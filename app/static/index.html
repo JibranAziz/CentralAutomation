@@ -409,6 +409,13 @@
   .topo-node.focus rect.card { stroke: var(--accent); stroke-width: 2.4; }
   .topo-node.focus rect.halo { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
   .topo-node.link:hover rect.card { stroke: var(--accent); }
+  .topo-node.unmanaged rect.card {
+    fill: var(--surface-2); stroke: var(--faint); stroke-width: 1.2; stroke-dasharray: 4 3;
+  }
+  .topo-node.unmanaged text.nm { fill: var(--muted); }
+  .topo-node.unmanaged text.sub { fill: var(--faint); font-style: italic; }
+  .topo-node.unmanaged.link:hover rect.card { stroke: var(--muted); stroke-dasharray: 4 3; }
+  .topo-legend .sw.dashed { background-image: none !important; border: 1px dashed var(--faint); height: 0; }
   .topo-node text.nm { fill: var(--ink); font-size: 11px; font-weight: 600; }
   .topo-node text.sub { fill: var(--muted); font-size: 9.5px; font-family: var(--mono); }
   .topo-node text.dot { font-size: 13px; }
@@ -1227,27 +1234,45 @@
 
     var layers = {};
     order.forEach(function (s) { (layers[depth[s]] = layers[depth[s]] || []).push(s); });
-    var COLW = 176, ROWH = 116, NW = 148, NH = 62, PADX = 96, PADY = 30;
-    var maxCols = 0, maxL = 0;
-    Object.keys(layers).forEach(function (k) { maxCols = Math.max(maxCols, layers[k].length); maxL = Math.max(maxL, +k); });
-    var width = PADX + maxCols * COLW, height = PADY * 2 + (maxL + 1) * ROWH;
-    var pos = {};
+
+    var NH = 62, ROWH = 118, PADX = 96, PADY = 30, GAP = 26, ICON_L = 46;
+    function isUnmanaged(s) {
+      var nd = nodes[s].n;
+      return s.indexOf("__") !== 0 && (nd.unmanaged || String(s).indexOf("tpd_") === 0);
+    }
+    function subText(s) {
+      var nd = nodes[s].n;
+      if (isUnmanaged(s)) return "Not managed by Central";
+      return nd.model || nd.ip || nd.type || "";
+    }
+    function nodeWidth(s) {
+      var nameW = String(nodes[s].n.name || "").length * 6.5;
+      var subW = String(subText(s)).length * 5.3;
+      return Math.max(132, Math.min(320, ICON_L + Math.max(nameW, subW) + 18));
+    }
+    var nw = {};
+    order.forEach(function (s) { nw[s] = nodeWidth(s); });
+
+    var pos = {}, maxRowW = 0, maxL = 0;
+    Object.keys(layers).forEach(function (k) {
+      var t = layers[k].reduce(function (a, s) { return a + nw[s]; }, 0) + GAP * (layers[k].length - 1);
+      maxRowW = Math.max(maxRowW, t); maxL = Math.max(maxL, +k);
+    });
+    var width = PADX + maxRowW + 32, height = PADY * 2 + (maxL + 1) * ROWH;
     Object.keys(layers).forEach(function (k) {
       var arr = layers[k], y = PADY + k * ROWH + NH / 2;
-      var startX = PADX + (maxCols * COLW - arr.length * COLW) / 2;
-      arr.forEach(function (s, i) { pos[s] = { x: startX + i * COLW + COLW / 2, y: y }; });
+      var total = arr.reduce(function (a, s) { return a + nw[s]; }, 0) + GAP * (arr.length - 1);
+      var cursor = PADX + (maxRowW - total) / 2;
+      arr.forEach(function (s) { pos[s] = { x: cursor + nw[s] / 2, y: y, w: nw[s] }; cursor += nw[s] + GAP; });
     });
 
     var svg = el("svg", { viewBox: "0 0 " + width + " " + height, width: width, "font-family": "inherit" });
 
-    // layer labels
     Object.keys(layers).forEach(function (k) {
-      var types = layers[k].map(function (s) { return nodes[s].n.type; });
-      var name = LAYER_NAME[types[0]] || (k === "0" ? "Internet" : "Devices");
+      var name = LAYER_NAME[nodes[layers[k][0]].n.type] || (k === "0" ? "Internet" : "Devices");
       svg.appendChild(el("text", { x: 12, y: PADY + k * ROWH + NH / 2 + 3, class: "topo-layer-label" })).textContent = name;
     });
 
-    // links
     links.forEach(function (l) {
       var a = pos[l.from], b = pos[l.to];
       if (!a || !b) return;
@@ -1263,32 +1288,39 @@
       svg.appendChild(p);
     });
 
-    // nodes
     order.forEach(function (s) {
-      var nd = nodes[s].n, p = pos[s];
-      var g = el("g", { class: "topo-node", transform: "translate(" + (p.x - NW / 2) + " " + (p.y - NH / 2) + ")" });
-      var managed = s.indexOf("__") !== 0 && !nd.unmanaged;
+      var nd = nodes[s].n, p = pos[s], W = p.w;
+      var g = el("g", { class: "topo-node", transform: "translate(" + (p.x - W / 2) + " " + (p.y - NH / 2) + ")" });
+      var unmanaged = isUnmanaged(s);
+      var synthetic = s.indexOf("__") === 0;
       var cls = "topo-node";
-      if (String(nd.health).toLowerCase() === "good") cls += " good";
-      if (String(nd.health).toLowerCase() === "poor") cls += " poor";
+      if (unmanaged) cls += " unmanaged";
+      else if (String(nd.health).toLowerCase() === "good") cls += " good";
+      else if (String(nd.health).toLowerCase() === "poor") cls += " poor";
       if (s === focus) cls += " focus";
-      if (managed) cls += " link";
+      if (!synthetic) cls += " link";
       g.setAttribute("class", cls);
-      if (s === focus) g.appendChild(el("rect", { class: "halo", x: -5, y: -5, width: NW + 10, height: NH + 10, rx: 13 }));
-      g.appendChild(el("rect", { class: "card", x: 0, y: 0, width: NW, height: NH, rx: 10 }));
+      if (s === focus) g.appendChild(el("rect", { class: "halo", x: -5, y: -5, width: W + 10, height: NH + 10, rx: 13 }));
+      g.appendChild(el("rect", { class: "card", x: 0, y: 0, width: W, height: NH, rx: 10 }));
       var icon = TOPO_ICON[nd.type] || TOPO_ICON.other;
       var im = el("image", { x: 10, y: NH / 2 - 15, width: 30, height: 30, href: "/static/icons/" + icon });
       im.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "/static/icons/" + icon);
       g.appendChild(im);
-      var nm = el("text", { class: "nm", x: 48, y: 24 }); nm.textContent = trunc(nd.name, 18); g.appendChild(nm);
-      var sub = el("text", { class: "sub", x: 48, y: 40 });
-      sub.textContent = trunc(nd.model || nd.ip || (nd.unmanaged ? "unmanaged" : nd.type), 20);
-      g.appendChild(sub);
-      if (managed) {
+      var nm = el("text", { class: "nm", x: ICON_L, y: 24 }); nm.textContent = trunc(nd.name, 40); g.appendChild(nm);
+      var sub = el("text", { class: "sub", x: ICON_L, y: 40 }); sub.textContent = trunc(subText(s), 42); g.appendChild(sub);
+      if (!synthetic) {
         g.style.cursor = "pointer";
-        g.addEventListener("click", function () { openEntity("device", nd.serial, nd.name); });
+        g.addEventListener("click", function () {
+          if (unmanaged) {
+            note.textContent = nd.name + " is connected to your network but is not managed by Aruba Central — no live monitoring or configuration for this device.";
+          } else {
+            openEntity("device", nd.serial, nd.name);
+          }
+        });
       }
-      var tt = el("title", {}); tt.textContent = nd.name + (nd.ip ? " · " + nd.ip : ""); g.appendChild(tt);
+      var tt = el("title", {});
+      tt.textContent = nd.name + (nd.ip ? " · " + nd.ip : "") + (unmanaged ? " · not managed by Central" : "");
+      g.appendChild(tt);
       svg.appendChild(g);
     });
 
@@ -1299,10 +1331,11 @@
       + (order.length - 1) + " connected node" + (order.length - 1 === 1 ? "" : "s")
       + (iso ? " · " + iso + " not linked" : "") + " · click a device to open it";
     legend.innerHTML = "";
-    [["Active path", "var(--accent)"], ["Link", "var(--border-strong)"], ["Degraded", "var(--down)"]]
+    [["Active path", "var(--accent)", ""], ["Link", "var(--border-strong)", ""],
+     ["Degraded", "var(--down)", ""], ["Not managed by Central", "var(--faint)", "dashed"]]
       .forEach(function (x) {
         var sp = document.createElement("span");
-        sp.innerHTML = '<i class="sw" style="background:' + x[1] + '"></i>' + x[0];
+        sp.innerHTML = '<i class="sw' + (x[2] ? " " + x[2] : "") + '" style="background:' + x[1] + '"></i>' + x[0];
         legend.appendChild(sp);
       });
   }

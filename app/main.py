@@ -481,6 +481,7 @@ async def _new_central_topology(host: str, token: str, site_id: str) -> Optional
             "mac": d.get("mac") or "",
             "status": d.get("status") or "",
             "health": d.get("health") or "",
+            "unmanaged": str(s).startswith("tpd_"),
         }
 
     links: list[dict[str, Any]] = []
