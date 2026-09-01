@@ -1,0 +1,17 @@
+[Unit]
+Description=Aruba Central Automation (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=jibran
+WorkingDirectory=/home/jibran/apps/aruba-central-automation
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/jibran/apps/aruba-central-automation/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
