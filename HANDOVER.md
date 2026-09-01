@@ -131,6 +131,13 @@ curl -sk https://centralautomation.arubademo.online/healthz \
   - Classic device/client items carry a site *name* (or `site_id` on switches);
     `_classic_resolve_site_id` maps name → numeric id via `/central/v2/sites`.
   - client/device/site detail: found by scanning the list responses.
+  - **AP Groups** (Classic-only card — New Central has no groups concept):
+    `GET /configuration/v2/groups` (`data` = list of `["name"]` or `{group}`);
+    per-group AP/switch/gateway counts derived from the monitoring lists by
+    `group_name`; detail adds `GET /configuration/v2/groups/{name}/properties`
+    (`data[0].properties`: Architecture, AOSVersion, ApNetworkRole, …). The card
+    is shown only when `activeFlavor === "classic"` (`data-flavor` attr).
+    **Not yet verified live** (needs a fresh Classic token).
 - AOS-8 Instant APs with no site assignment return an empty siteId → their
   topology section shows "unavailable" (expected).
 - Classic topology drops generic placeholder nodes by name (`inet`, `wifi-sta`,
