@@ -751,6 +751,14 @@
             <div class="s-value dim" data-stat="apGroups">—</div>
             <div class="s-more">View all →</div>
           </button>
+          <button class="statcard" type="button" data-entity="ssids" style="--c:#db2777">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="12" r="1.6" fill="currentColor"/><path d="M4.5 9.5a5 5 0 0 1 7 0M2 7a8.5 8.5 0 0 1 12 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+              <span class="s-label">SSIDs</span>
+            </div>
+            <div class="s-value dim" data-stat="ssids">—</div>
+            <div class="s-more">View all →</div>
+          </button>
         </div>
         <div class="dash-actions">
           <span class="upd" id="dash-updated"></span>
@@ -996,6 +1004,9 @@
     gateways: { title: "Gateways", drill: "device", idKey: "serial", cols: DEV_COLS },
     "ap-groups": { title: "AP Groups", drill: "group", idKey: "name", cols: [
       ["name", "Group"], ["aps", "APs"], ["switches", "Switches"], ["gateways", "Gateways"]] },
+    "ssids": { title: "SSIDs", drill: "ssid", idKey: "name", cols: [
+      ["name", "SSID"], ["status", "Status"], ["security", "Security"], ["securityLevel", "Type"],
+      ["band", "Bands"], ["vlan", "VLAN"], ["clients", "Clients"]] },
     sites: { title: "Sites", drill: "site", idKey: "id", cols: [
       ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
       ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },
@@ -1016,7 +1027,7 @@
   var dState = { entity: null, rows: [], band: "", q: "" };
 
   function pill(val) {
-    var ok = /^(up|connected|active|started)$/i.test(String(val));
+    var ok = /^(up|connected|active|started|enabled|online|good)$/i.test(String(val));
     var s = document.createElement("span");
     s.className = "pill " + (ok ? "ok" : "bad");
     s.textContent = val;
@@ -1224,7 +1235,7 @@
             var sp = pill(m.status); sp.classList.add("m-pill"); b.appendChild(sp);
           }
           if (m.serial) {
-            b.addEventListener("click", function () { openEntity("device", m.serial, m.name); });
+            b.addEventListener("click", function () { openEntity(m.kind || "device", m.serial, m.name); });
           } else {
             b.disabled = true;
           }
@@ -1237,7 +1248,8 @@
       loadTopology(d.meta || {});
     });
   }
-  var MEMBER_ICON = { ap: "IndoorAP.svg", switch: "L2-Switch.svg", gateway: "Gateway.svg", other: "L2-Switch.svg" };
+  var MEMBER_ICON = { ap: "IndoorAP.svg", switch: "L2-Switch.svg", gateway: "Gateway.svg",
+    client: "Mobile-or-Tablet.svg", other: "L2-Switch.svg" };
 
   /* ---- Topology view ---- */
   var TOPO_ICON = {

@@ -250,22 +250,26 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
-        "gateways": None, "sites": None, "subscriptions": None, "apGroups": None,
+        "gateways": None, "sites": None, "subscriptions": None,
+        "apGroups": None, "ssids": None,
     }
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            clients_total, sites_total, subs_total, dev_totals = await asyncio.gather(
+            clients_total, sites_total, subs_total, ssid_total, dev_totals = await asyncio.gather(
                 _get_total(client, f"https://{host}/network-monitoring/v1/clients",
                            headers, {"limit": "1"}),
                 _get_total(client, f"https://{host}/network-monitoring/v1/sites-health",
                            headers, {"limit": "1"}),
                 _get_total(client, "https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions",
                            headers, {"limit": "1"}),
+                _get_total(client, f"https://{host}/network-monitoring/v1/wlans",
+                           headers, {"limit": "1"}),
                 _new_central_device_totals(client, host, headers),
             )
         out["clients"] = clients_total
         out["sites"] = sites_total
         out["subscriptions"] = subs_total
+        out["ssids"] = ssid_total
         if dev_totals:
             out.update(dev_totals)
     except Exception:
@@ -742,9 +746,67 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
             if sc != 200 and not raw:
                 return None, 0
             rows = [_norm_sub(x) for x in raw]
+        elif entity == "ssids":
+            raw, total, sc = await _fetch_all(
+                client, f"https://{host}/network-monitoring/v1/wlans", headers, style="cursor")
+            if sc != 200 and not raw:
+                return None, 0
+            rows = [_norm_wlan(x) for x in raw]
         else:
             return None, 0
     return rows, total if total is not None else len(rows)
+
+
+def _norm_wlan(w: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": w.get("wlanName") or w.get("name") or "—",
+        "status": "Enabled" if str(w.get("status", "")).upper() in ("ENABLED", "UP", "1") else "Disabled",
+        "security": w.get("security") or "—",
+        "securityLevel": w.get("securityLevel") or w.get("type") or "—",
+        "band": w.get("band") or "—",
+        "vlan": str(w.get("vlan") or "—"),
+        "clients": w.get("clientCount"),
+    }
+
+
+async def _new_central_ssid_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        wlans, _t, _sc = await _fetch_all(
+            client, f"https://{host}/network-monitoring/v1/wlans", headers, style="cursor")
+        w = next((x for x in wlans if (x.get("wlanName") or x.get("name")) == name), None)
+        if w is None:
+            return None
+        clients, _t2, _sc2 = await _fetch_all(
+            client, f"https://{host}/network-monitoring/v1/clients", headers, style="cursor")
+    members = [{
+        "name": _pick(c, "hostName", "clientName", "macAddress", default="?"),
+        "serial": c.get("macAddress"), "category": "client", "kind": "client",
+        "status": c.get("status") or "",
+    } for c in clients if c.get("wlanName") == name]
+    cfg = {
+        "security": w.get("security"), "securityLevel": w.get("securityLevel"),
+        "band": w.get("band"), "vlan": w.get("vlan"),
+        "status": "Enabled" if str(w.get("status", "")).upper() == "ENABLED" else "Disabled",
+    }
+    usage = {"clientCount": w.get("clientCount"), "connected": len(members)}
+    groups = [
+        _kv_group("Configuration", cfg, [
+            ("status", "Status"), ("security", "Security"), ("securityLevel", "Security level"),
+            ("band", "Bands"), ("vlan", "VLAN"),
+        ]),
+        _kv_group("Clients", usage, [
+            ("clientCount", "Reported client count"), ("connected", "Connected now"),
+        ]),
+    ]
+    return {
+        "title": name,
+        "subtitle": w.get("security") or "SSID",
+        "status": cfg["status"],
+        "groups": [g for g in groups if g],
+        "devices": members,
+        "meta": {"kind": "ssid"},
+    }
 
 
 async def _classic_central_devices(host: str, token: str) -> Optional[dict[str, dict[str, int]]]:
@@ -932,7 +994,8 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
-        "gateways": None, "sites": None, "subscriptions": None, "apGroups": None,
+        "gateways": None, "sites": None, "subscriptions": None,
+        "apGroups": None, "ssids": None,
     }
     probes = {
         "accessPoints": "/monitoring/v2/aps",
@@ -940,6 +1003,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "gateways": "/monitoring/v1/gateways",
         "sites": "/central/v2/sites",
         "subscriptions": "/platform/licensing/v1/subscriptions",
+        "ssids": "/monitoring/v1/networks",
     }
 
     async def _count_groups(client):
@@ -1079,6 +1143,18 @@ async def _classic_central_list(host: str, token: str, entity: str
                 if row["clients"] is None:
                     row["clients"] = counts.get(row["serial"])
                 rows.append(row)
+        elif entity == "ssids":
+            raw, seen = [], False
+            for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
+                r, _t, sc = await _fetch_all(
+                    client, f"https://{host}{path}", headers, style="offset",
+                    params={"limit": "1000", "calculate_total": "true"}, item_key="networks")
+                if sc == 200 or r:
+                    seen, raw = True, r
+                    break
+            if not seen:
+                return None, 0
+            rows = [_classic_norm_ssid(x) for x in raw]
         elif entity == "ap-groups":
             names, _sc = await _classic_group_names(client, host, headers)
             dc = await _classic_group_device_counts(client, host, headers)
@@ -1266,6 +1342,63 @@ async def _classic_central_site_detail(host: str, token: str, site_id: str) -> O
         "status": "",
         "groups": [g for g in groups if g],
         "meta": {"kind": "site", "siteId": row["id"] or row["name"]},
+    }
+
+
+def _classic_norm_ssid(n: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": _pick(n, "essid", "name", "network", "ssid", default="—"),
+        "status": "Enabled" if _pick(n, "enabled", "is_enabled", default=True) else "Disabled",
+        "security": _pick(n, "security", "security_type", "key_management", "opmode", default="—"),
+        "securityLevel": _pick(n, "type", "wlan_type", "profile_type", default="—"),
+        "band": _pick(n, "band", default="—"),
+        "vlan": str(_pick(n, "vlan", "vlan_id", default="—")),
+        "clients": _pick(n, "client_count", "num_clients", "clients", "associated_client_count"),
+    }
+
+
+async def _classic_central_ssid_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    net = None
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
+            raw, _t, _sc = await _fetch_all(
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000"}, item_key="networks")
+            net = next((x for x in raw
+                        if _pick(x, "essid", "name", "network", "ssid") == name), None)
+            if net is not None:
+                break
+        if net is None:
+            return None
+        members: list[dict[str, str]] = []
+        craw, _t2, _sc2 = await _fetch_all(
+            client, f"https://{host}/monitoring/v1/clients/wireless", headers, style="offset",
+            params={"limit": "1000"}, item_key="clients")
+        for c in craw:
+            if _pick(c, "network", "ssid", "essid") == name:
+                members.append({
+                    "name": _pick(c, "name", "hostname", "macaddr", default="?"),
+                    "serial": _pick(c, "macaddr", default=""),
+                    "category": "client", "kind": "client", "status": "Connected",
+                })
+    row = _classic_norm_ssid(net)
+    groups = [
+        _kv_group("Configuration", row, [
+            ("status", "Status"), ("security", "Security"), ("securityLevel", "Type"),
+            ("band", "Bands"), ("vlan", "VLAN"),
+        ]),
+        _kv_group("Clients", {"c": row["clients"], "n": len(members)}, [
+            ("c", "Reported client count"), ("n", "Connected now"),
+        ]),
+    ]
+    return {
+        "title": name,
+        "subtitle": row["security"] if row["security"] != "—" else "SSID",
+        "status": row["status"],
+        "groups": [g for g in groups if g],
+        "devices": members,
+        "meta": {"kind": "ssid"},
     }
 
 
@@ -1531,12 +1664,13 @@ _DASH = {
         "overview": _new_central_overview, "list": _new_central_list,
         "client": _new_central_client_detail, "device": _new_central_device_detail,
         "site": _new_central_site_detail, "topology": _new_central_topology,
+        "ssid": _new_central_ssid_detail,
     },
     "classic": {
         "overview": _classic_central_overview, "list": _classic_central_list,
         "client": _classic_central_client_detail, "device": _classic_central_device_detail,
         "site": _classic_central_site_detail, "topology": _classic_central_topology,
-        "group": _classic_central_group_detail,
+        "group": _classic_central_group_detail, "ssid": _classic_central_ssid_detail,
     },
 }
 
@@ -1565,7 +1699,7 @@ async def overview(flavor: str, request: Request) -> JSONResponse:
 @app.get("/api/list/{flavor}/{entity}")
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
-                      "subscriptions", "ap-groups"}:
+                      "subscriptions", "ap-groups", "ssids"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -1578,7 +1712,7 @@ async def list_entity(flavor: str, entity: str, request: Request) -> JSONRespons
 
 @app.get("/api/detail/{flavor}/{kind}/{ident}")
 async def detail(flavor: str, kind: str, ident: str, request: Request) -> JSONResponse:
-    if kind not in ("client", "device", "site", "group"):
+    if kind not in ("client", "device", "site", "group", "ssid"):
         return _err(404, "Unknown detail type.")
     conn, err = _dash_conn(request, flavor)
     if err:
