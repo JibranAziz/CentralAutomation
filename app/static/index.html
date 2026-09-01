@@ -1,0 +1,1247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aruba Central Automation</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #f5f7fa;
+    --grid: #e6ebf2;
+    --surface: #ffffff;
+    --surface-2: #f0f3f7;
+    --border: #dde3ec;
+    --border-strong: #c6cfdc;
+    --ink: #1b2432;
+    --muted: #5c6879;
+    --faint: #8a95a5;
+    --accent: #12876a;
+    --accent-ink: #ffffff;
+    --accent-wash: #12876a14;
+    --accent-line: #12876a44;
+    --ok: #1f9d57;
+    --down: #cf3b3b;
+    --danger: #b23b3b;
+    --danger-wash: #b23b3b12;
+    --focus: #2f74d0;
+    --shadow: 0 1px 2px #1b243208, 0 12px 32px -12px #1b243222;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d121c;
+      --grid: #161e2c;
+      --surface: #141c29;
+      --surface-2: #1a2434;
+      --border: #26303f;
+      --border-strong: #34404f;
+      --ink: #e7edf5;
+      --muted: #8d9aac;
+      --faint: #6a7688;
+      --accent: #35c495;
+      --accent-ink: #05221a;
+      --accent-wash: #35c4951f;
+      --accent-line: #35c49555;
+      --ok: #3fb977;
+      --down: #e5735f;
+      --danger: #e57373;
+      --danger-wash: #e5737317;
+      --focus: #63a4f4;
+      --shadow: 0 1px 2px #00000030, 0 18px 44px -16px #00000066;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d121c;
+    --grid: #161e2c;
+    --surface: #141c29;
+    --surface-2: #1a2434;
+    --border: #26303f;
+    --border-strong: #34404f;
+    --ink: #e7edf5;
+    --muted: #8d9aac;
+    --faint: #6a7688;
+    --accent: #35c495;
+    --accent-ink: #05221a;
+    --accent-wash: #35c4951f;
+    --accent-line: #35c49555;
+    --ok: #3fb977;
+    --down: #e5735f;
+    --danger: #e57373;
+    --danger-wash: #e5737317;
+    --focus: #63a4f4;
+    --shadow: 0 1px 2px #00000030, 0 18px 44px -16px #00000066;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background-color: var(--ground);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 44px 44px;
+    background-position: center top;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+  }
+  img { max-width: 100%; }
+  .wrap { max-width: 1220px; margin: 0 auto; padding: 56px 24px 72px; }
+  /* narrow column for the intro + connect forms; dashboards use full width */
+  .masthead, .tabs, #panel-connect, .foot {
+    max-width: 640px; margin-left: auto; margin-right: auto;
+  }
+
+  .masthead { text-align: center; margin-bottom: 34px; }
+  .mark { display: inline-flex; align-items: flex-end; gap: 3px; height: 30px; margin-bottom: 14px; }
+  .mark i { display: block; width: 0; height: 0; border-style: solid; }
+  .mark i:nth-child(1) { border-width: 0 0 12px 12px; border-color: transparent transparent var(--ink) transparent; }
+  .mark i:nth-child(2) { border-width: 0 0 20px 20px; border-color: transparent transparent var(--ink) transparent; }
+  .mark i:nth-child(3) { border-width: 0 0 28px 28px; border-color: transparent transparent var(--ink) transparent; }
+  .mark svg { margin-left: 4px; align-self: flex-start; }
+  h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
+  .masthead p { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; }
+
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 20px; }
+  .tab {
+    appearance: none; cursor: pointer; text-align: left;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 13px 15px; color: var(--ink);
+    font-family: inherit; transition: border-color .12s, background .12s;
+  }
+  .tab:hover { border-color: var(--border-strong); }
+  .tab[aria-selected="true"] {
+    border-color: var(--accent-line); background: var(--accent-wash);
+    box-shadow: inset 0 0 0 1px var(--accent-line);
+  }
+  .tab .t-name { font-size: 14px; font-weight: 600; display: block; }
+  .tab[aria-selected="true"] .t-name { color: var(--accent); }
+  .tab .t-desc { font-size: 11.5px; color: var(--faint); margin-top: 2px; display: block; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .card-head {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.11em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .card-body { padding: 20px; }
+
+  .status {
+    display: none; margin-bottom: 20px;
+    border: 1px solid var(--accent-line); background: var(--accent-wash);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .status.on { display: block; }
+  .status-row { display: flex; align-items: flex-start; gap: 10px; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    margin-top: 6px; flex: none; box-shadow: 0 0 0 3px var(--accent-wash);
+  }
+  .status-main { flex: 1; min-width: 0; }
+  .status-title { font-size: 13.5px; font-weight: 600; color: var(--accent); }
+  .status-url { font-family: var(--mono); font-size: 11.5px; color: var(--muted); word-break: break-all; margin-top: 2px; }
+  .devgrid {
+    margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--accent-line);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .devrow {
+    display: grid; grid-template-columns: 1fr 84px 84px; gap: 12px;
+    align-items: center; font-size: 12.5px;
+  }
+  .devname { color: var(--ink); }
+  .devstat {
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .devstat b { color: var(--ink); font-weight: 600; }
+  .devstat.zero { opacity: .4; }
+  .pip { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .pip.up { background: var(--ok); }
+  .pip.down { background: var(--down); }
+  .devnote {
+    margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--accent-line);
+    font-size: 11.5px; color: var(--faint);
+  }
+  .linkbtn {
+    appearance: none; background: none; border: none; cursor: pointer;
+    font-family: inherit; font-size: 12px; color: var(--muted);
+    text-decoration: underline; text-underline-offset: 2px; padding: 0;
+  }
+  .linkbtn:hover { color: var(--ink); }
+  .status-foot {
+    margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--accent-line);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .foot-actions { display: flex; gap: 14px; }
+  .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+  .chk input { width: 15px; height: 15px; accent-color: var(--accent); }
+  .status-note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
+  .status-note code {
+    font-family: var(--mono); color: var(--muted);
+    background: var(--surface-2); padding: 1px 4px; border-radius: 4px;
+  }
+
+  .field { margin-bottom: 17px; }
+  .field:last-of-type { margin-bottom: 0; }
+  label.lbl { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+  label.lbl .req { color: var(--accent); margin-left: 2px; }
+  .hint { font-size: 11.5px; color: var(--faint); margin-top: 6px; line-height: 1.45; }
+  input[type="text"], input[type="password"], select {
+    width: 100%; font-family: var(--sans); font-size: 13.5px;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: 9px;
+    padding: 10px 12px; transition: border-color .12s, box-shadow .12s;
+  }
+  input::placeholder { color: var(--faint); }
+  input:focus-visible, select:focus-visible, .tab:focus-visible,
+  button:focus-visible, .chk input:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 2px; border-color: transparent;
+  }
+  select {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: right 15px center, right 10px center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 34px;
+  }
+  input[data-mono], select { font-family: var(--mono); font-size: 12.5px; }
+  .secret { position: relative; }
+  .secret input { padding-right: 40px; }
+  .reveal {
+    position: absolute; right: 4px; top: 4px; bottom: 4px; width: 32px;
+    display: grid; place-items: center; cursor: pointer;
+    background: none; border: none; color: var(--faint); border-radius: 6px;
+  }
+  .reveal:hover { color: var(--ink); }
+  .err { font-size: 11.5px; color: var(--danger); margin-top: 6px; display: none; }
+  .field.invalid .err { display: block; }
+  .field.invalid input, .field.invalid select { border-color: var(--danger); }
+
+  .info {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 11px 13px; font-size: 12px; color: var(--muted);
+    margin-top: 18px;
+  }
+  .info svg { flex: none; margin-top: 1px; color: var(--accent); }
+
+  .formerr {
+    display: none; margin-top: 18px; gap: 8px; align-items: flex-start;
+    background: var(--danger-wash); border: 1px solid var(--danger);
+    border-radius: 9px; padding: 11px 13px; font-size: 12px; color: var(--danger);
+    line-height: 1.45;
+  }
+  .formerr.on { display: flex; }
+  .formerr svg { flex: none; margin-top: 1px; }
+
+  .actions { margin-top: 22px; display: flex; justify-content: flex-end; }
+  .btn {
+    appearance: none; cursor: pointer; font-family: inherit;
+    font-size: 13.5px; font-weight: 600;
+    background: var(--accent); color: var(--accent-ink);
+    border: none; border-radius: 9px; padding: 11px 20px;
+    transition: filter .12s, transform .04s;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { transform: translateY(1px); }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+  .foot { text-align: center; margin-top: 28px; font-size: 11.5px; color: var(--faint); }
+
+  .panel-head { font-size: 15px; font-weight: 600; margin: 2px 0 14px; letter-spacing: -0.01em; }
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; }
+  .statcard {
+    text-align: left; font-family: inherit; cursor: pointer;
+    background: color-mix(in srgb, var(--c) 6%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--c) 28%, var(--border));
+    border-radius: 13px; padding: 15px 16px; box-shadow: var(--shadow);
+    transition: transform .1s, border-color .12s, box-shadow .12s;
+    display: block; width: 100%;
+  }
+  .statcard:hover {
+    transform: translateY(-2px);
+    border-color: var(--c);
+    box-shadow: 0 2px 4px #0000000f, 0 16px 34px -14px color-mix(in srgb, var(--c) 55%, transparent);
+  }
+  .statcard:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .stat-top { display: flex; align-items: center; gap: 9px; }
+  .stat-ico {
+    width: 28px; height: 28px; border-radius: 8px; flex: none;
+    display: grid; place-items: center;
+    background: color-mix(in srgb, var(--c) 16%, transparent);
+    color: var(--c);
+  }
+  .statcard .s-label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .statcard .s-value {
+    font-size: 26px; font-weight: 600; margin-top: 10px; color: var(--ink);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  }
+  .statcard .s-value.dim { color: var(--faint); }
+  .statcard .s-more {
+    margin-top: 4px; font-size: 11px; color: var(--c);
+    opacity: 0; transition: opacity .12s;
+  }
+  .statcard:hover .s-more, .statcard:focus-visible .s-more { opacity: 1; }
+  .prompt {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: var(--shadow); padding: 34px 24px; text-align: center;
+  }
+  .prompt p { margin: 0 0 16px; color: var(--muted); font-size: 13.5px; }
+  .dash-actions {
+    display: flex; justify-content: space-between; align-items: center; margin-top: 16px;
+  }
+  .dash-actions .upd { font-size: 11.5px; color: var(--faint); }
+
+  /* detail drill-down */
+  .detail-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .detail-bar .panel-head { margin: 0; }
+  .detail-controls {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px;
+  }
+  .search {
+    flex: 1 1 200px; position: relative;
+  }
+  .search input {
+    width: 100%; font-family: var(--sans); font-size: 13px; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 9px; padding: 9px 12px 9px 32px;
+  }
+  .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--faint); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    appearance: none; font-family: inherit; font-size: 11.5px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    color: var(--muted); border-radius: 999px; padding: 6px 12px;
+    transition: background .1s, color .1s, border-color .1s;
+  }
+  .chip:hover { border-color: var(--faint); }
+  .chip[aria-pressed="true"] {
+    background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent);
+  }
+  .detail-count { font-size: 11.5px; color: var(--muted); margin-bottom: 8px; }
+  .tablewrap {
+    overflow-x: auto; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); box-shadow: var(--shadow);
+  }
+  table.dtable { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.dtable th {
+    text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    position: sticky; top: 0; background: var(--surface);
+  }
+  table.dtable td {
+    padding: 8px 10px; border-bottom: 1px solid var(--border);
+    color: var(--ink); vertical-align: top;
+  }
+  table.dtable tr:last-child td { border-bottom: none; }
+  table.dtable tbody tr:hover td { background: var(--surface-2); }
+  table.dtable td.mono { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .pill {
+    display: inline-block; font-size: 10.5px; font-weight: 600; padding: 2px 8px;
+    border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+  .pill.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .pill.bad { background: color-mix(in srgb, var(--down) 16%, transparent); color: var(--down); }
+  .empty { padding: 28px 12px; text-align: center; color: var(--faint); font-size: 12.5px; }
+  table.dtable tr.clickable { cursor: pointer; }
+  table.dtable tr.clickable td:first-child { color: var(--accent); font-weight: 500; }
+  .rowchevron { color: var(--faint); }
+
+  #entity-groups {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 12px; align-items: start;
+  }
+  #entity-groups .egroup { margin-bottom: 0; }
+  .entity-head { margin-bottom: 16px; }
+  .entity-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .entity-sub {
+    display: block; margin-top: 3px; font-family: var(--mono);
+    font-size: 11.5px; color: var(--muted);
+  }
+  .egroup {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow);
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .egroup h4 {
+    margin: 0; padding: 11px 15px; border-bottom: 1px solid var(--border);
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .egroup dl { margin: 0; padding: 6px 15px 10px; }
+  .egroup .kv {
+    display: grid; grid-template-columns: 150px 1fr; gap: 12px;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .egroup .kv:last-child { border-bottom: none; }
+  .egroup dt { color: var(--muted); }
+  .egroup dd { margin: 0; color: var(--ink); word-break: break-word; }
+  @media (max-width: 480px) { .egroup .kv { grid-template-columns: 1fr; gap: 2px; } }
+
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media (max-width: 520px) {
+    .wrap { padding: 36px 16px 56px; }
+    .tabs { grid-template-columns: 1fr; }
+    .status-row { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <span class="mark" aria-hidden="true">
+      <i></i><i></i><i></i>
+      <svg width="20" height="16" viewBox="0 0 20 16" fill="none">
+        <path d="M2 5.5C6.5 1.5 13.5 1.5 18 5.5" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M5.5 9C8 6.8 12 6.8 14.5 9" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="10" cy="12.5" r="1.8" fill="var(--accent)"/>
+      </svg>
+    </span>
+    <h1>Aruba Central Automation</h1>
+    <p>Connect an Aruba Central environment with your own API credentials.</p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="tab-connect" aria-selected="true" aria-controls="panel-connect">
+      <span class="t-name">Connect Central</span>
+      <span class="t-desc">Manage API connections</span>
+    </button>
+    <button class="tab" role="tab" id="tab-classic" aria-selected="false" aria-controls="panel-classic" tabindex="-1">
+      <span class="t-name">Classic Central</span>
+      <span class="t-desc">Legacy API gateway</span>
+    </button>
+    <button class="tab" role="tab" id="tab-newcentral" aria-selected="false" aria-controls="panel-newcentral" tabindex="-1">
+      <span class="t-name">New Central</span>
+      <span class="t-desc">HPE Aruba Networking Central</span>
+    </button>
+  </div>
+
+  <!-- ================= CONNECT CENTRAL ================= -->
+  <section role="tabpanel" id="panel-connect" aria-labelledby="tab-connect">
+  <div class="card">
+    <div class="card-head">Connect Classic Central</div>
+    <div class="card-body">
+      <div class="status" id="status-classic">
+        <div class="status-row">
+          <span class="dot"></span>
+          <div class="status-main">
+            <div class="status-title">Connected — Classic Central</div>
+            <div class="status-url" data-url></div>
+          </div>
+          <button class="linkbtn" data-disconnect>Disconnect</button>
+        </div>
+        <div class="devgrid" data-devgrid></div>
+        <p class="devnote" data-devnote hidden>Device status isn't available for this API client.</p>
+        <div class="status-foot">
+          <label class="chk"><input type="checkbox" data-webhooks checked> Enable webhook notifications</label>
+          <div class="foot-actions">
+            <button class="linkbtn" data-refresh>Refresh</button>
+            <button class="linkbtn" data-regen>Regenerate key</button>
+          </div>
+        </div>
+        <p class="status-note">
+          Webhook key <code data-whk>whk_…</code> active. Add the webhook URL shown when it was
+          generated to Aruba Central if you haven't already.
+        </p>
+      </div>
+
+      <form id="form-classic" novalidate>
+        <div class="field" data-validate>
+          <label class="lbl" for="c-baseurl">Base URL <span class="req">*</span></label>
+          <select id="c-baseurl" name="baseUrl" data-mono></select>
+          <div class="hint">From Aruba Central → Account Home → API Gateway → System Apps &amp; Tokens.</div>
+          <div class="err">Select a base URL.</div>
+        </div>
+        <div class="field" data-custom-for="c-baseurl" hidden>
+          <label class="lbl" for="c-baseurl-custom">Custom base URL <span class="req">*</span></label>
+          <input type="text" id="c-baseurl-custom" name="baseUrlCustom" data-mono placeholder="apigw-yourregion.central.arubanetworks.com">
+          <div class="err">Enter the API gateway hostname.</div>
+        </div>
+        <div class="field" data-validate>
+          <label class="lbl" for="c-clientid">Client ID <span class="req">*</span></label>
+          <input type="text" id="c-clientid" name="clientId" data-mono placeholder="a1b2c3d4e5f6" autocomplete="off">
+          <div class="err">Client ID is required.</div>
+        </div>
+        <div class="field" data-validate>
+          <label class="lbl" for="c-secret">Client Secret <span class="req">*</span></label>
+          <div class="secret">
+            <input type="password" id="c-secret" name="clientSecret" placeholder="Client secret" autocomplete="off">
+            <button type="button" class="reveal" aria-label="Show client secret" data-reveal="c-secret">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg>
+            </button>
+          </div>
+          <div class="err">Client secret is required.</div>
+        </div>
+        <div class="field" data-validate>
+          <label class="lbl" for="c-refresh">Refresh Token <span class="req">*</span></label>
+          <div class="secret">
+            <input type="password" id="c-refresh" name="refreshToken" placeholder="Refresh token" autocomplete="off">
+            <button type="button" class="reveal" aria-label="Show refresh token" data-reveal="c-refresh">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg>
+            </button>
+          </div>
+          <div class="hint">Generate from API Gateway → Download Token. Classic Central refresh tokens expire — regenerate when the connection drops.</div>
+          <div class="err">Refresh token is required.</div>
+        </div>
+
+        <div class="info">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Credentials are used only to open this browser session and are never written to disk. Another browser starts a fresh session.
+        </div>
+
+        <div class="formerr" data-formerr>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span data-formerr-msg></span>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn">Connect Classic Central</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="card-head">Connect New Central</div>
+    <div class="card-body">
+      <div class="status" id="status-new">
+        <div class="status-row">
+          <span class="dot"></span>
+          <div class="status-main">
+            <div class="status-title">Connected — New Central</div>
+            <div class="status-url" data-url></div>
+          </div>
+          <button class="linkbtn" data-disconnect>Disconnect</button>
+        </div>
+        <div class="devgrid" data-devgrid></div>
+        <p class="devnote" data-devnote hidden>Device status isn't available for this API client.</p>
+        <div class="status-foot">
+          <label class="chk"><input type="checkbox" data-webhooks checked> Enable webhook notifications</label>
+          <div class="foot-actions">
+            <button class="linkbtn" data-refresh>Refresh</button>
+            <button class="linkbtn" data-regen>Regenerate key</button>
+          </div>
+        </div>
+        <p class="status-note">
+          Webhook key <code data-whk>whk_…</code> active. Add the webhook URL and API key shown
+          when it was generated to New Central if you haven't already.
+        </p>
+      </div>
+
+      <form id="form-new" novalidate>
+        <div class="field" data-validate>
+          <label class="lbl" for="n-cluster">Cluster <span class="req">*</span></label>
+          <select id="n-cluster" name="cluster" data-mono></select>
+          <div class="hint">Find your cluster in New Central → Menu → API Gateway → REST API.</div>
+          <div class="err">Select a cluster.</div>
+        </div>
+        <div class="field" data-custom-for="n-cluster" hidden>
+          <label class="lbl" for="n-cluster-custom">Custom cluster URL <span class="req">*</span></label>
+          <input type="text" id="n-cluster-custom" name="clusterCustom" data-mono placeholder="yourregion.api.central.arubanetworks.com">
+          <div class="err">Enter the cluster hostname.</div>
+        </div>
+        <div class="field" data-validate>
+          <label class="lbl" for="n-clientid">Client ID <span class="req">*</span></label>
+          <input type="text" id="n-clientid" name="clientId" data-mono placeholder="da9f588d-e412-429f-bcf1-e760c9323012" autocomplete="off">
+          <div class="hint">From New Central → Menu → API Gateway → API client credentials.</div>
+          <div class="err">Client ID is required.</div>
+        </div>
+        <div class="field" data-validate>
+          <label class="lbl" for="n-secret">Client Secret <span class="req">*</span></label>
+          <div class="secret">
+            <input type="password" id="n-secret" name="clientSecret" placeholder="Client secret" autocomplete="off">
+            <button type="button" class="reveal" aria-label="Show client secret" data-reveal="n-secret">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg>
+            </button>
+          </div>
+          <div class="err">Client secret is required.</div>
+        </div>
+
+        <div class="info">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.2 12.3 3.6v3.9c0 3.2-2.2 5-5.3 6-3.1-1-5.3-2.8-5.3-6V3.6L7 1.2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M4.8 7 6.4 8.6 9.4 5.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          New Central uses client credentials — no token download or refresh token required.
+        </div>
+
+        <div class="info">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Credentials are used only to open this browser session and are never written to disk. Another browser starts a fresh session.
+        </div>
+
+        <div class="formerr" data-formerr>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span data-formerr-msg></span>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn">Connect New Central</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  </section>
+
+  <!-- ================= CLASSIC CENTRAL DASHBOARD ================= -->
+  <section role="tabpanel" id="panel-classic" aria-labelledby="tab-classic" hidden>
+    <div class="prompt" id="classic-prompt">
+      <p>Connect Classic Central from the <strong>Connect Central</strong> tab to see its dashboard.</p>
+      <button class="btn" type="button" data-goto="tab-connect">Go to Connect Central</button>
+    </div>
+    <div id="classic-dash" hidden>
+      <div class="panel-head">Account Overview</div>
+      <p class="foot" style="text-align:left;margin-top:0">Classic Central blocks coming next.</p>
+    </div>
+  </section>
+
+  <!-- ================= NEW CENTRAL DASHBOARD ================= -->
+  <section role="tabpanel" id="panel-newcentral" aria-labelledby="tab-newcentral" hidden>
+    <div class="prompt" id="new-prompt">
+      <p>Connect New Central from the <strong>Connect Central</strong> tab to see your account overview.</p>
+      <button class="btn" type="button" data-goto="tab-connect">Go to Connect Central</button>
+    </div>
+    <div id="new-dash" hidden>
+      <div id="new-overview">
+        <div class="panel-head">Account Overview</div>
+        <div class="statgrid" id="new-statgrid">
+          <button class="statcard" type="button" data-entity="clients" style="--c:#3b82f6">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.4" stroke="currentColor" stroke-width="1.4"/><path d="M1.8 13c0-2.3 1.9-4 4.2-4s4.2 1.7 4.2 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11 4.2A2.2 2.2 0 0 1 11 8.4M11.5 13c0-1.7-.7-3.1-1.8-3.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              <span class="s-label">Clients</span>
+            </div>
+            <div class="s-value dim" data-stat="clients">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+          <button class="statcard" type="button" data-entity="access-points" style="--c:#f59e0b">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3 6.5a6 6 0 0 1 10 0M5 8.4a3.4 3.4 0 0 1 6 0" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="1.5" fill="currentColor"/></svg></span>
+              <span class="s-label">Access Points</span>
+            </div>
+            <div class="s-value dim" data-stat="accessPoints">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+          <button class="statcard" type="button" data-entity="switches" style="--c:#8b5cf6">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="4.5" width="13" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M4 8h1.5M7.2 8h1.5M10.4 8h1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              <span class="s-label">Switches</span>
+            </div>
+            <div class="s-value dim" data-stat="switches">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+          <button class="statcard" type="button" data-entity="gateways" style="--c:#14b8a6">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12M4 4.5l8 7M12 4.5l-8 7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+              <span class="s-label">Gateways</span>
+            </div>
+            <div class="s-value dim" data-stat="gateways">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+          <button class="statcard" type="button" data-entity="sites" style="--c:#22c55e">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 14s5-4.2 5-8A5 5 0 0 0 3 6c0 3.8 5 8 5 8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8" cy="6" r="1.7" stroke="currentColor" stroke-width="1.4"/></svg></span>
+              <span class="s-label">Sites</span>
+            </div>
+            <div class="s-value dim" data-stat="sites">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+          <button class="statcard" type="button" data-entity="subscriptions" style="--c:#6366f1">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h9A1.5 1.5 0 0 1 14 5.5V7a1.3 1.3 0 0 0 0 2.6v1A1.5 1.5 0 0 1 12.5 12h-9A1.5 1.5 0 0 1 2 10.5v-1a1.3 1.3 0 0 0 0-2.6V5.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 4v8" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.6 1.6"/></svg></span>
+              <span class="s-label">Subscriptions</span>
+            </div>
+            <div class="s-value dim" data-stat="subscriptions">—</div>
+            <div class="s-more">View all →</div>
+          </button>
+        </div>
+        <div class="dash-actions">
+          <span class="upd" id="new-updated"></span>
+          <button class="linkbtn" type="button" id="new-dash-refresh">Refresh</button>
+        </div>
+      </div>
+
+      <div id="new-detail" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="detail-back">← Account Overview</button>
+          <span class="panel-head" id="detail-title">Clients</span>
+        </div>
+
+        <div id="detail-list">
+          <div class="detail-controls">
+            <span class="search">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="m9.3 9.3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+              <input type="search" id="detail-search" placeholder="Search…" autocomplete="off">
+            </span>
+            <div class="chips" id="detail-bands" hidden>
+              <button class="chip" type="button" data-band="" aria-pressed="true">All</button>
+              <button class="chip" type="button" data-band="2.4 GHz" aria-pressed="false">2.4 GHz</button>
+              <button class="chip" type="button" data-band="5 GHz" aria-pressed="false">5 GHz</button>
+              <button class="chip" type="button" data-band="6 GHz" aria-pressed="false">6 GHz</button>
+              <button class="chip" type="button" data-band="Wired" aria-pressed="false">Wired</button>
+            </div>
+            <button class="linkbtn" type="button" id="detail-csv">Download CSV</button>
+            <button class="linkbtn" type="button" id="detail-refresh">Refresh</button>
+          </div>
+          <div class="detail-count" id="detail-count"></div>
+          <div class="tablewrap">
+            <table class="dtable" id="detail-table"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+
+        <div id="detail-entity" hidden>
+          <div class="detail-bar">
+            <button class="linkbtn" type="button" id="entity-back">← Back to list</button>
+          </div>
+          <div class="entity-head">
+            <span class="entity-title" id="entity-title"></span>
+            <span class="entity-sub" id="entity-sub"></span>
+          </div>
+          <div id="entity-groups"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">&copy; <span id="year"></span> Aruba Central Automation</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var CLASSIC_URLS = [
+    ["HPE Internal", "internal-apigw.central.arubanetworks.com"],
+    ["US-1", "app1-apigw.central.arubanetworks.com"],
+    ["US-2", "apigw-prod2.central.arubanetworks.com"],
+    ["US-East1", "apigw-us-east-1.central.arubanetworks.com"],
+    ["US-West4", "apigw-uswest4.central.arubanetworks.com"],
+    ["EU-1", "eu-apigw.central.arubanetworks.com"],
+    ["EU-Central2", "apigw-eucentral2.central.arubanetworks.com"],
+    ["EU-Central3", "apigw-eucentral3.central.arubanetworks.com"],
+    ["Canada-1", "apigw-ca.central.arubanetworks.com"],
+    ["China-1", "apigw.central.arubanetworks.com.cn"],
+    ["APAC-1", "api-ap.central.arubanetworks.com"],
+    ["APAC-East1", "apigw-apaceast.central.arubanetworks.com"],
+    ["APAC-South1", "apigw-apacsouth.central.arubanetworks.com"],
+    ["UAE-North1", "apigw-uaenorth1.central.arubanetworks.com"]
+  ];
+  var NEW_URLS = [
+    ["Internal (HPE)", "internal.api.central.arubanetworks.com"],
+    ["US-1", "us1.api.central.arubanetworks.com"],
+    ["US-2", "us2.api.central.arubanetworks.com"],
+    ["US-West4", "us4.api.central.arubanetworks.com"],
+    ["US-West5", "us5.api.central.arubanetworks.com"],
+    ["US-East1", "us6.api.central.arubanetworks.com"],
+    ["EU-1", "de1.api.central.arubanetworks.com"],
+    ["EU-Central2", "de2.api.central.arubanetworks.com"],
+    ["EU-Central3", "de3.api.central.arubanetworks.com"],
+    ["UK", "gb1.api.central.arubanetworks.com"],
+    ["Canada-1", "ca1.api.central.arubanetworks.com"],
+    ["APAC-1", "in1.api.central.arubanetworks.com"],
+    ["APAC-East1", "jp1.api.central.arubanetworks.com"],
+    ["APAC-South1", "au1.api.central.arubanetworks.com"],
+    ["UAE", "ae1.api.central.arubanetworks.com"],
+    ["China", "cn1.api.central.arubanetworks.com.cn"]
+  ];
+
+  function fillSelect(el, rows) {
+    var frag = document.createDocumentFragment();
+    var ph = new Option("Select…", "");
+    ph.disabled = true; ph.selected = true;
+    frag.appendChild(ph);
+    rows.forEach(function (r) { frag.appendChild(new Option(r[0] + " — " + r[1], r[1])); });
+    frag.appendChild(new Option("Custom URL…", "__custom__"));
+    el.appendChild(frag);
+  }
+  fillSelect(document.getElementById("c-baseurl"), CLASSIC_URLS);
+  fillSelect(document.getElementById("n-cluster"), NEW_URLS);
+  document.getElementById("year").textContent = new Date().getFullYear();
+
+  /* Tabs */
+  var TAB_IDS = ["tab-connect", "tab-classic", "tab-newcentral"];
+  var PANEL_IDS = { "tab-connect": "panel-connect", "tab-classic": "panel-classic", "tab-newcentral": "panel-newcentral" };
+  var tabs = TAB_IDS.map(function (id) { return document.getElementById(id); });
+  function selectTab(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(PANEL_IDS[t.id]).hidden = !on;
+    });
+    if (tab.id === "tab-newcentral") loadNewOverview(false);
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener("click", function () { selectTab(t); });
+    t.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        var next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+        next.focus(); selectTab(next);
+      }
+    });
+  });
+  document.querySelectorAll("[data-goto]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var t = document.getElementById(b.getAttribute("data-goto"));
+      t.focus(); selectTab(t);
+    });
+  });
+
+  /* Reveal secrets */
+  document.querySelectorAll("[data-reveal]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var inp = document.getElementById(btn.getAttribute("data-reveal"));
+      var show = inp.type === "password";
+      inp.type = show ? "text" : "password";
+    });
+  });
+
+  /* Custom URL toggle */
+  document.querySelectorAll("select[id]").forEach(function (sel) {
+    var extra = document.querySelector('[data-custom-for="' + sel.id + '"]');
+    if (!extra) return;
+    sel.addEventListener("change", function () { extra.hidden = sel.value !== "__custom__"; });
+  });
+
+  function api(path, opts) {
+    return fetch(path, Object.assign({
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin"
+    }, opts || {})).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (body) {
+        return { ok: r.ok, status: r.status, body: body };
+      });
+    });
+  }
+
+  /* ---- Dashboards ---- */
+  var connState = { classic: false, new: false };
+  var newOverviewLoaded = false;
+
+  function updateDashboards() {
+    document.getElementById("classic-prompt").hidden = connState.classic;
+    document.getElementById("classic-dash").hidden = !connState.classic;
+    document.getElementById("new-prompt").hidden = connState.new;
+    document.getElementById("new-dash").hidden = !connState.new;
+    if (!connState.new) {
+      newOverviewLoaded = false;
+      closeDetail();
+      document.querySelectorAll('#new-statgrid [data-stat]').forEach(function (el) {
+        el.textContent = "—"; el.classList.add("dim");
+      });
+      document.getElementById("new-updated").textContent = "";
+    }
+  }
+
+  function fmt(n) { return (n == null) ? "—" : String(n); }
+
+  function loadNewOverview(force) {
+    if (!connState.new) return;
+    if (newOverviewLoaded && !force) return;
+    newOverviewLoaded = true;
+    var btn = document.getElementById("new-dash-refresh");
+    btn.disabled = true; btn.textContent = "Loading…";
+    api("/api/overview/new").then(function (res) {
+      if (!res.ok) { newOverviewLoaded = false; return; }
+      var o = res.body.overview || {};
+      document.querySelectorAll('#new-statgrid [data-stat]').forEach(function (el) {
+        var v = o[el.getAttribute("data-stat")];
+        el.textContent = fmt(v);
+        el.classList.toggle("dim", v == null);
+      });
+      var d = new Date();
+      document.getElementById("new-updated").textContent =
+        "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }).finally(function () { btn.disabled = false; btn.textContent = "Refresh"; });
+  }
+  document.getElementById("new-dash-refresh").addEventListener("click", function () {
+    loadNewOverview(true);
+  });
+
+  /* ---- New Central drill-down ---- */
+  var DEV_COLS = [["name", "Name"], ["status", "Status"], ["ip", "IPv4"], ["model", "Model"],
+    ["serial", "Serial"], ["mac", "MAC"], ["clients", "Clients"], ["firmware", "Firmware"], ["site", "Site"]];
+  var DETAIL = {
+    clients: { title: "Clients", bands: true, drill: "client", idKey: "mac", cols: [
+      ["name", "Name"], ["connType", "Type"], ["status", "Status"], ["mac", "MAC"],
+      ["ip", "IPv4"], ["vlan", "VLAN"], ["band", "Band"], ["channel", "Channel"], ["snr", "SNR"],
+      ["connectedTo", "Connected To"], ["link", "Link"], ["os", "Client OS"], ["site", "Site"]] },
+    "access-points": { title: "Access Points", drill: "device", idKey: "serial", cols: DEV_COLS },
+    switches: { title: "Switches", drill: "device", idKey: "serial", cols: DEV_COLS },
+    gateways: { title: "Gateways", drill: "device", idKey: "serial", cols: DEV_COLS },
+    sites: { title: "Sites", cols: [
+      ["name", "Site"], ["city", "City"], ["country", "Country"], ["clients", "Clients"], ["alerts", "Alerts"]] },
+    subscriptions: { title: "Subscriptions", cols: [
+      ["description", "Subscription"], ["sku", "SKU"], ["tier", "Tier"], ["quantity", "Qty"],
+      ["available", "Available"], ["status", "Status"], ["end", "Expires"], ["eval", "Kind"]] }
+  };
+  var MONO_KEYS = { mac: 1, serial: 1, ip: 1, sku: 1 };
+
+  var detailEl = document.getElementById("new-detail");
+  var overviewEl = document.getElementById("new-overview");
+  var listEl = document.getElementById("detail-list");
+  var entityEl = document.getElementById("detail-entity");
+  var searchEl = document.getElementById("detail-search");
+  var bandsEl = document.getElementById("detail-bands");
+  var tableEl = document.getElementById("detail-table");
+  var countEl = document.getElementById("detail-count");
+  var dState = { entity: null, rows: [], band: "", q: "" };
+
+  function pill(val) {
+    var ok = /^(up|connected|active|started)$/i.test(String(val));
+    var s = document.createElement("span");
+    s.className = "pill " + (ok ? "ok" : "bad");
+    s.textContent = val;
+    return s;
+  }
+
+  function visibleRows() {
+    var def = DETAIL[dState.entity];
+    var q = dState.q.trim().toLowerCase();
+    return dState.rows.filter(function (r) {
+      if (dState.band && r.band !== dState.band) return false;
+      if (!q) return true;
+      return def.cols.some(function (c) {
+        return String(r[c[0]] == null ? "" : r[c[0]]).toLowerCase().indexOf(q) !== -1;
+      });
+    });
+  }
+
+  function renderDetailTable() {
+    var def = DETAIL[dState.entity];
+    var rows = visibleRows();
+    var thead = tableEl.tHead, tbody = tableEl.tBodies[0];
+    thead.innerHTML = "";
+    var htr = thead.insertRow();
+    def.cols.forEach(function (c) {
+      var th = document.createElement("th");
+      th.textContent = c[1];
+      htr.appendChild(th);
+    });
+    if (def.drill) htr.appendChild(document.createElement("th"));
+
+    tbody.innerHTML = "";
+    if (!rows.length) {
+      var tr = tbody.insertRow();
+      var td = tr.insertCell();
+      td.colSpan = def.cols.length + (def.drill ? 1 : 0);
+      td.className = "empty";
+      td.textContent = dState.rows.length ? "No matches." : "Nothing to show.";
+    } else {
+      rows.forEach(function (r) {
+        var tr = tbody.insertRow();
+        if (def.drill) {
+          tr.className = "clickable";
+          tr.tabIndex = 0;
+          tr.addEventListener("click", function () { openEntity(def.drill, r[def.idKey], r.name); });
+          tr.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") openEntity(def.drill, r[def.idKey], r.name);
+          });
+        }
+        def.cols.forEach(function (c) {
+          var td = tr.insertCell();
+          var v = r[c[0]];
+          if (c[0] === "status") { td.appendChild(pill(v)); return; }
+          td.textContent = (v == null || v === "") ? "—" : String(v);
+          if (MONO_KEYS[c[0]]) td.className = "mono";
+        });
+        if (def.drill) {
+          var cd = tr.insertCell();
+          cd.className = "rowchevron";
+          cd.textContent = "›";
+        }
+      });
+    }
+    countEl.textContent = "Showing " + rows.length + " of " + dState.rows.length;
+  }
+
+  function csvEscape(v) {
+    var s = (v == null || v === "—") ? "" : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function downloadCsv() {
+    var def = DETAIL[dState.entity];
+    var rows = visibleRows();
+    var lines = [def.cols.map(function (c) { return csvEscape(c[1]); }).join(",")];
+    rows.forEach(function (r) {
+      lines.push(def.cols.map(function (c) { return csvEscape(r[c[0]]); }).join(","));
+    });
+    // UTF-8 BOM so Excel reads accents / dashes correctly
+    var blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = dState.entity + "-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function openDetail(entity) {
+    var def = DETAIL[entity];
+    if (!def) return;
+    dState = { entity: entity, rows: [], band: "", q: "" };
+    document.getElementById("detail-title").textContent = def.title;
+    searchEl.value = "";
+    bandsEl.hidden = !def.bands;
+    bandsEl.querySelectorAll(".chip").forEach(function (c) {
+      c.setAttribute("aria-pressed", c.getAttribute("data-band") === "" ? "true" : "false");
+    });
+    overviewEl.hidden = true;
+    detailEl.hidden = false;
+    entityEl.hidden = true;
+    listEl.hidden = false;
+    countEl.textContent = "Loading…";
+    tableEl.tHead.innerHTML = ""; tableEl.tBodies[0].innerHTML = "";
+    fetchDetail(entity);
+  }
+
+  function fetchDetail(entity) {
+    var rb = document.getElementById("detail-refresh");
+    rb.disabled = true;
+    api("/api/list/new/" + entity).then(function (res) {
+      if (dState.entity !== entity) return;
+      if (!res.ok) { countEl.textContent = (res.body && res.body.error) || "Could not load data."; return; }
+      dState.rows = res.body.rows || [];
+      renderDetailTable();
+    }).finally(function () { rb.disabled = false; });
+  }
+
+  function openEntity(kind, ident, name) {
+    if (!ident) return;
+    listEl.hidden = true;
+    entityEl.hidden = false;
+    document.getElementById("entity-title").textContent = name || "Loading…";
+    document.getElementById("entity-sub").textContent = "";
+    var groupsEl = document.getElementById("entity-groups");
+    groupsEl.innerHTML = '<p class="detail-count">Loading…</p>';
+    api("/api/detail/new/" + kind + "/" + encodeURIComponent(ident)).then(function (res) {
+      if (!res.ok) {
+        groupsEl.innerHTML = "";
+        var p = document.createElement("p");
+        p.className = "detail-count";
+        p.textContent = (res.body && res.body.error) || "Could not load details.";
+        groupsEl.appendChild(p);
+        return;
+      }
+      var d = res.body.detail || {};
+      var titleEl = document.getElementById("entity-title");
+      titleEl.textContent = d.title || name || "";
+      if (d.status) { titleEl.appendChild(document.createTextNode(" ")); titleEl.appendChild(pill(d.status)); }
+      document.getElementById("entity-sub").textContent = d.subtitle || "";
+      groupsEl.innerHTML = "";
+      (d.groups || []).forEach(function (g) {
+        var box = document.createElement("div");
+        box.className = "egroup";
+        var h = document.createElement("h4");
+        h.textContent = g.label;
+        box.appendChild(h);
+        var dl = document.createElement("dl");
+        (g.fields || []).forEach(function (f) {
+          var row = document.createElement("div");
+          row.className = "kv";
+          var dt = document.createElement("dt");
+          dt.textContent = f[0];
+          var dd = document.createElement("dd");
+          dd.textContent = f[1];
+          row.appendChild(dt); row.appendChild(dd);
+          dl.appendChild(row);
+        });
+        box.appendChild(dl);
+        groupsEl.appendChild(box);
+      });
+    });
+  }
+
+  function closeDetail() {
+    detailEl.hidden = true;
+    overviewEl.hidden = false;
+    dState.entity = null;
+  }
+
+  document.getElementById("new-statgrid").addEventListener("click", function (e) {
+    var card = e.target.closest("[data-entity]");
+    if (card) openDetail(card.getAttribute("data-entity"));
+  });
+  document.getElementById("detail-back").addEventListener("click", closeDetail);
+  document.getElementById("entity-back").addEventListener("click", function () {
+    entityEl.hidden = true;
+    listEl.hidden = false;
+  });
+  document.getElementById("detail-refresh").addEventListener("click", function () {
+    if (dState.entity) { countEl.textContent = "Loading…"; fetchDetail(dState.entity); }
+  });
+  document.getElementById("detail-csv").addEventListener("click", downloadCsv);
+  searchEl.addEventListener("input", function () {
+    dState.q = searchEl.value;
+    if (dState.entity) renderDetailTable();
+  });
+  bandsEl.addEventListener("click", function (e) {
+    var chip = e.target.closest(".chip");
+    if (!chip) return;
+    dState.band = chip.getAttribute("data-band");
+    bandsEl.querySelectorAll(".chip").forEach(function (c) {
+      c.setAttribute("aria-pressed", c === chip ? "true" : "false");
+    });
+    renderDetailTable();
+  });
+
+  function wire(cfg) {
+    var form = document.getElementById(cfg.form);
+    var status = document.getElementById(cfg.status);
+    var btn = form.querySelector(".btn");
+    var formErr = form.querySelector("[data-formerr]");
+    var formErrMsg = form.querySelector("[data-formerr-msg]");
+    var chk = status.querySelector("[data-webhooks]");
+
+    function showError(msg) {
+      formErrMsg.textContent = msg;
+      formErr.classList.add("on");
+    }
+    function clearError() { formErr.classList.remove("on"); }
+
+    var DEV_LABELS = [["ap", "Access Points"], ["switch", "Switches"], ["gateway", "Gateways"], ["bridge", "Bridges"]];
+
+    function render(part) {
+      if (part && part.connected) {
+        status.querySelector("[data-url]").textContent = part.url || "";
+        status.querySelector("[data-whk]").textContent = part.webhookKey || "whk_…";
+        chk.checked = part.webhooks !== false;
+
+        var grid = status.querySelector("[data-devgrid]");
+        var note = status.querySelector("[data-devnote]");
+        if (part.devices) {
+          grid.hidden = false;
+          note.hidden = true;
+          grid.innerHTML = DEV_LABELS.map(function (d) {
+            var v = part.devices[d[0]] || { up: 0, down: 0 };
+            return '<div class="devrow"><span class="devname">' + d[1] + "</span>"
+              + '<span class="devstat' + (v.up ? "" : " zero") + '"><span class="pip up"></span><b>' + v.up + "</b> up</span>"
+              + '<span class="devstat' + (v.down ? "" : " zero") + '"><span class="pip down"></span><b>' + v.down + "</b> down</span>"
+              + "</div>";
+          }).join("");
+        } else {
+          grid.hidden = true;
+          grid.innerHTML = "";
+          note.hidden = false;
+        }
+
+        status.classList.add("on");
+        form.hidden = true;
+      } else {
+        status.classList.remove("on");
+        form.hidden = false;
+      }
+      connState[cfg.key] = !!(part && part.connected);
+      updateDashboards();
+    }
+
+    function validate() {
+      var ok = true;
+      form.querySelectorAll(".field").forEach(function (f) {
+        var host = f.closest("[data-custom-for]") || (f.hasAttribute("data-custom-for") ? f : null);
+        var ctrl = f.querySelector("input, select");
+        if (!ctrl) return;
+        var isCustomField = f.hasAttribute("data-custom-for");
+        if (isCustomField && f.hidden) { f.classList.remove("invalid"); return; }
+        var needed = f.hasAttribute("data-validate") || (isCustomField && !f.hidden);
+        var bad = needed && !String(ctrl.value || "").trim();
+        if (ctrl.tagName === "SELECT" && ctrl.value === "__custom__") bad = false;
+        f.classList.toggle("invalid", bad);
+        if (bad) ok = false;
+      });
+      return ok;
+    }
+
+    function payload() {
+      var data = {};
+      form.querySelectorAll("input, select").forEach(function (el) {
+        if (el.name) data[el.name] = String(el.value || "").trim();
+      });
+      var sel = form.querySelector("select");
+      if (sel.value === "__custom__") {
+        data[sel.name] = form.querySelector('[data-custom-for="' + sel.id + '"] input').value.trim();
+      }
+      return data;
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      clearError();
+      if (!validate()) {
+        var first = form.querySelector(".field.invalid input, .field.invalid select");
+        if (first) first.focus();
+        return;
+      }
+      btn.disabled = true;
+      var original = btn.textContent;
+      btn.textContent = "Connecting…";
+      api(cfg.connect, { method: "POST", body: JSON.stringify(payload()) })
+        .then(function (res) {
+          if (!res.ok) { showError(res.body.error || ("Connection failed (" + res.status + ").")); return; }
+          render(res.body[cfg.key]);
+        })
+        .catch(function () { showError("Network error — could not reach the server."); })
+        .finally(function () { btn.disabled = false; btn.textContent = original; });
+    });
+
+    status.querySelector("[data-disconnect]").addEventListener("click", function () {
+      api(cfg.disconnect, { method: "POST" }).then(function (res) { render((res.body || {})[cfg.key]); });
+    });
+    status.querySelector("[data-refresh]").addEventListener("click", function () {
+      var b = status.querySelector("[data-refresh]");
+      b.disabled = true; b.textContent = "Refreshing…";
+      api(cfg.refresh, { method: "POST" })
+        .then(function (res) {
+          if (res.ok) render((res.body || {})[cfg.key]);
+          else showError(res.body.error || "Could not refresh device status.");
+        })
+        .finally(function () { b.disabled = false; b.textContent = "Refresh"; });
+    });
+    status.querySelector("[data-regen]").addEventListener("click", function () {
+      api(cfg.webhook, { method: "POST", body: JSON.stringify({ regenerate: true }) })
+        .then(function (res) { render((res.body || {})[cfg.key]); });
+    });
+    chk.addEventListener("change", function () {
+      api(cfg.webhook, { method: "POST", body: JSON.stringify({ enabled: chk.checked }) })
+        .then(function (res) { render((res.body || {})[cfg.key]); });
+    });
+
+    cfg._render = render;
+  }
+
+  var classic = { form: "form-classic", status: "status-classic", key: "classic",
+    connect: "/api/connect/classic", disconnect: "/api/disconnect/classic",
+    refresh: "/api/refresh/classic", webhook: "/api/webhooks/classic" };
+  var neu = { form: "form-new", status: "status-new", key: "new",
+    connect: "/api/connect/new", disconnect: "/api/disconnect/new",
+    refresh: "/api/refresh/new", webhook: "/api/webhooks/new" };
+  wire(classic);
+  wire(neu);
+
+  /* Restore state for this browser session */
+  api("/api/session").then(function (res) {
+    if (!res.ok) return;
+    classic._render(res.body.classic);
+    neu._render(res.body.new);
+  });
+})();
+</script>
+</body>
+</html>
