@@ -1031,36 +1031,52 @@
     });
 
     var pending = groups.length;
-    groups.forEach(function (g) {
+
+    function done() {
+      pending -= 1;
+      if (pending > 0) return;
+      btn.disabled = false; btn.textContent = "Refresh";
+      document.querySelectorAll('#dash-statgrid [data-stat].shimmer').forEach(function (el) {
+        el.classList.remove("shimmer"); el.textContent = "—"; el.classList.add("dim");
+      });
+      var d = new Date();
+      document.getElementById("dash-updated").textContent =
+        "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      setTimeout(function () { if (activeFlavor === flavor) prog.innerHTML = ""; }, 1400);
+    }
+
+    function loadGroup(g, tries) {
       api("/api/overview/" + flavor + "/" + g[0]).then(function (res) {
-        if (activeFlavor !== flavor) return;
-        var v = (res.ok && res.body.values) || {};
-        Object.keys(v).forEach(function (k) {
+        if (activeFlavor !== flavor) { done(); return; }
+        var v = (res.ok && res.body && res.body.values) || {};
+        var keys = Object.keys(v);
+        var bad = !res.ok || keys.length === 0 || keys.some(function (k) { return v[k] == null; });
+        if (bad && tries < 3) {
+          if (chips[g[0]]) chips[g[0]].className = "pchip loading";
+          setTimeout(function () { loadGroup(g, tries + 1); }, 600 + tries * 900);
+          return;
+        }
+        keys.forEach(function (k) {
           var el = document.querySelector('#dash-statgrid [data-stat="' + k + '"]');
           if (!el) return;
           el.classList.remove("shimmer");
           el.textContent = fmt(v[k]);
           el.classList.toggle("dim", v[k] == null);
         });
-        chips[g[0]].className = res.ok ? "pchip done" : "pchip err";
+        if (chips[g[0]]) chips[g[0]].className = bad ? "pchip err" : "pchip done";
+        done();
       }).catch(function () {
-        if (chips[g[0]]) chips[g[0]].className = "pchip err";
-      }).finally(function () {
-        pending -= 1;
-        if (pending <= 0) {
-          btn.disabled = false; btn.textContent = "Refresh";
-          document.querySelectorAll('#dash-statgrid [data-stat].shimmer').forEach(function (el) {
-            el.classList.remove("shimmer"); el.textContent = "—"; el.classList.add("dim");
-          });
-          var d = new Date();
-          document.getElementById("dash-updated").textContent =
-            "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-          setTimeout(function () {
-            if (activeFlavor === flavor) prog.innerHTML = "";
-          }, 1400);
+        if (activeFlavor !== flavor) { done(); return; }
+        if (tries < 3) {
+          setTimeout(function () { loadGroup(g, tries + 1); }, 800 + tries * 1000);
+          return;
         }
+        if (chips[g[0]]) chips[g[0]].className = "pchip err";
+        done();
       });
-    });
+    }
+
+    groups.forEach(function (g) { loadGroup(g, 0); });
   }
   document.getElementById("dash-refresh").addEventListener("click", function () {
     loadOverview(true);

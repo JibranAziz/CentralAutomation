@@ -205,12 +205,17 @@ async def _new_central_devices(host: str, token: str) -> Optional[dict[str, dict
 
 async def _get_total(client: httpx.AsyncClient, url: str, headers: dict[str, str],
                      params: Optional[dict[str, str]] = None) -> Optional[int]:
-    try:
-        r = await client.get(url, headers=headers, params=params or {})
-        if r.status_code == 200:
-            return r.json().get("total")
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            r = await client.get(url, headers=headers, params=params or {})
+            if r.status_code == 200:
+                return r.json().get("total")
+            if r.status_code not in (429, 500, 502, 503, 504):
+                return None
+        except Exception:
+            pass
+        if attempt < 2:
+            await asyncio.sleep(0.4 * (attempt + 1))
     return None
 
 
@@ -1780,7 +1785,7 @@ OVERVIEW_GROUPS = {
 
 async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict[str, Optional[int]]:
     hdr = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+    async with httpx.AsyncClient(timeout=45.0) as cx:
         if flavor == "new":
             if group == "clients":
                 return {"clients": await _get_total(cx, f"https://{host}/network-monitoring/v1/clients", hdr, {"limit": "1"})}
