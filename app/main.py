@@ -1393,19 +1393,44 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
                         out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
                         out[nm]["mon"] = n
                 break
+
+        # live client tallies + bands per SSID from the wireless clients list
+        craw, _t2, _sc2 = await _fetch_all(
+            client, f"https://{host}/monitoring/v1/clients/wireless", headers,
+            style="offset", params={"limit": "1000"}, item_key="clients")
+        for c in craw:
+            nm = _pick(c, "network", "ssid", "essid")
+            if not nm:
+                continue
+            e = out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
+            e["clientCount"] = e.get("clientCount", 0) + 1
+            b = _classic_band(_pick(c, "band"))
+            if b:
+                e.setdefault("bands", set()).add(b)
+            v = _pick(c, "vlan", "vlan_id")
+            if v:
+                e.setdefault("vlans", set()).add(str(v))
     return out
+
+
+_BAND_ORDER = {"2.4 GHz": 0, "5 GHz": 1, "6 GHz": 2}
 
 
 def _ssid_row(name: str, e: dict[str, Any]) -> dict[str, Any]:
     m = e.get("mon") or {}
+    bands = e.get("bands")
+    vlans = e.get("vlans")
+    live = e.get("clientCount")
+    mon_ct = _pick(m, "client_count", "num_clients", "clients", "associated_client_count")
     return {
         "name": name,
         "status": "Enabled" if _pick(m, "enabled", "is_enabled", default=True) else "Disabled",
         "security": e.get("security") or _pick(m, "security", "security_type", default="—"),
         "securityLevel": e.get("type") or _pick(m, "type", "wlan_type", default="—"),
-        "band": _pick(m, "band", default="—"),
-        "vlan": str(_pick(m, "vlan", "vlan_id", default="—")),
-        "clients": _pick(m, "client_count", "num_clients", "clients", "associated_client_count"),
+        "band": ", ".join(sorted(bands, key=lambda b: _BAND_ORDER.get(b, 9))) if bands
+                else _pick(m, "band", default="—"),
+        "vlan": ", ".join(sorted(vlans)) if vlans else str(_pick(m, "vlan", "vlan_id", default="—")),
+        "clients": live if live is not None else mon_ct,
         "groups": ", ".join(sorted(e.get("groups", []))) or "—",
     }
 
@@ -1740,6 +1765,83 @@ async def overview(flavor: str, request: Request) -> JSONResponse:
         return err
     data = await _DASH[flavor]["overview"](conn["host"], conn["access_token"])
     return JSONResponse({"overview": data})
+
+
+# metric groups that the dashboard loads independently (progressive fill)
+OVERVIEW_GROUPS = {
+    "clients": ["clients"],
+    "devices": ["accessPoints", "switches", "gateways"],
+    "sites": ["sites"],
+    "subscriptions": ["subscriptions"],
+    "ssids": ["ssids"],
+    "apGroups": ["apGroups"],
+}
+
+
+async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict[str, Optional[int]]:
+    hdr = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+        if flavor == "new":
+            if group == "clients":
+                return {"clients": await _get_total(cx, f"https://{host}/network-monitoring/v1/clients", hdr, {"limit": "1"})}
+            if group == "devices":
+                return await _new_central_device_totals(cx, host, hdr) or {
+                    "accessPoints": None, "switches": None, "gateways": None}
+            if group == "sites":
+                return {"sites": await _get_total(cx, f"https://{host}/network-monitoring/v1/sites-health", hdr, {"limit": "1"})}
+            if group == "subscriptions":
+                return {"subscriptions": await _get_total(
+                    cx, "https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions", hdr, {"limit": "1"})}
+            if group == "ssids":
+                return {"ssids": await _get_total(cx, f"https://{host}/network-monitoring/v1/wlans", hdr, {"limit": "1"})}
+            if group == "apGroups":
+                return {"apGroups": None}
+        else:  # classic
+            if group == "clients":
+                tot = 0
+                got = False
+                for path, _w in CLASSIC_CLIENT_SOURCES:
+                    rows, _t, sc = await _fetch_all(cx, f"https://{host}{path}", hdr,
+                                                   style="offset", params={"limit": "1000"}, item_key="clients")
+                    if sc == 200 or rows:
+                        got = True
+                        tot += len(rows)
+                return {"clients": tot if got else None}
+            if group == "devices":
+                out: dict[str, Optional[int]] = {}
+                for key, path in (("accessPoints", "/monitoring/v2/aps"),
+                                  ("switches", "/monitoring/v1/switches"),
+                                  ("gateways", "/monitoring/v1/gateways")):
+                    out[key] = await _get_total(cx, f"https://{host}{path}", hdr,
+                                                {"limit": "1", "calculate_total": "true"})
+                return out
+            if group == "sites":
+                return {"sites": await _get_total(cx, f"https://{host}/central/v2/sites", hdr,
+                                                  {"limit": "1", "calculate_total": "true"})}
+            if group == "subscriptions":
+                return {"subscriptions": await _get_total(
+                    cx, f"https://{host}/platform/licensing/v1/subscriptions", hdr, {"limit": "1"})}
+            if group == "apGroups":
+                names, _sc = await _classic_group_names(cx, host, hdr)
+                return {"apGroups": len(names) if names is not None else None}
+    if group == "ssids" and flavor == "classic":
+        smap = await _classic_ssid_map(host, token)
+        return {"ssids": len(smap) if smap else None}
+    return {}
+
+
+@app.get("/api/overview/{flavor}/{group}")
+async def overview_group(flavor: str, group: str, request: Request) -> JSONResponse:
+    if group not in OVERVIEW_GROUPS:
+        return _err(404, "Unknown metric group.")
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    try:
+        values = await _overview_part(flavor, group, conn["host"], conn["access_token"])
+    except Exception:
+        values = {k: None for k in OVERVIEW_GROUPS[group]}
+    return JSONResponse({"values": values})
 
 
 @app.get("/api/list/{flavor}/{entity}")

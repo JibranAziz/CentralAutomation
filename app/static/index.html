@@ -307,6 +307,32 @@
     display: flex; justify-content: space-between; align-items: center; margin-top: 16px;
   }
   .dash-actions .upd { font-size: 11.5px; color: var(--faint); }
+  .dash-progress { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .dash-progress:empty { display: none; }
+  .pchip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 500; padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+    transition: color .2s, border-color .2s, opacity .4s;
+  }
+  .pchip .pdot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+  .pchip.loading { border-color: var(--accent-line); color: var(--accent); }
+  .pchip.loading .pdot { background: var(--accent); animation: ppulse .9s ease-in-out infinite; }
+  .pchip.done { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--ok); }
+  .pchip.done .pdot { background: var(--ok); }
+  .pchip.err { border-color: var(--danger); color: var(--danger); }
+  .pchip.err .pdot { background: var(--danger); }
+  @keyframes ppulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.6); } }
+  .s-value.shimmer {
+    display: inline-block; width: 66px; height: 26px; margin-top: 8px; border-radius: 7px;
+    color: transparent;
+    background: linear-gradient(90deg, var(--surface-2) 20%, var(--border) 42%, var(--surface-2) 64%);
+    background-size: 300% 100%; animation: shim 1.25s ease-in-out infinite;
+  }
+  @keyframes shim { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .pchip.loading .pdot, .s-value.shimmer { animation: none; }
+  }
 
   /* detail drill-down */
   .detail-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
@@ -694,6 +720,7 @@
     <div id="dashboard" hidden>
       <div id="dash-overview">
         <div class="panel-head">Account Overview</div>
+        <div class="dash-progress" id="dash-progress"></div>
         <div class="statgrid" id="dash-statgrid">
           <button class="statcard" type="button" data-entity="clients" style="--c:#3b82f6">
             <div class="stat-top">
@@ -958,13 +985,19 @@
       overviewLoaded[activeFlavor] = false;
       closeDetail();
       document.querySelectorAll('#dash-statgrid [data-stat]').forEach(function (el) {
-        el.textContent = "—"; el.classList.add("dim");
+        el.classList.remove("shimmer"); el.textContent = "—"; el.classList.add("dim");
       });
+      document.getElementById("dash-progress").innerHTML = "";
       document.getElementById("dash-updated").textContent = "";
     }
   }
 
   function fmt(n) { return (n == null) ? "—" : String(n); }
+
+  var OV_GROUPS = [
+    ["clients", "Clients"], ["devices", "Devices"], ["sites", "Sites"],
+    ["subscriptions", "Subscriptions"], ["ssids", "SSIDs"], ["apGroups", "AP Groups"]
+  ];
 
   function loadOverview(force) {
     var flavor = activeFlavor;
@@ -973,19 +1006,58 @@
     overviewLoaded[flavor] = true;
     var btn = document.getElementById("dash-refresh");
     btn.disabled = true; btn.textContent = "Loading…";
-    api("/api/overview/" + flavor).then(function (res) {
-      if (activeFlavor !== flavor) return;
-      if (!res.ok) { overviewLoaded[flavor] = false; return; }
-      var o = res.body.overview || {};
-      document.querySelectorAll('#dash-statgrid [data-stat]').forEach(function (el) {
-        var v = o[el.getAttribute("data-stat")];
-        el.textContent = fmt(v);
-        el.classList.toggle("dim", v == null);
+    document.getElementById("dash-updated").textContent = "";
+
+    var groups = OV_GROUPS.filter(function (g) {
+      return !(flavor === "new" && g[0] === "apGroups");
+    });
+    var prog = document.getElementById("dash-progress");
+    prog.innerHTML = "";
+    var chips = {};
+    groups.forEach(function (g) {
+      var c = document.createElement("span");
+      c.className = "pchip loading";
+      var dot = document.createElement("i"); dot.className = "pdot";
+      c.appendChild(dot);
+      c.appendChild(document.createTextNode(g[1]));
+      prog.appendChild(c);
+      chips[g[0]] = c;
+    });
+    document.querySelectorAll('#dash-statgrid [data-stat]').forEach(function (el) {
+      el.classList.add("shimmer"); el.classList.remove("dim"); el.textContent = "";
+    });
+
+    var pending = groups.length;
+    groups.forEach(function (g) {
+      api("/api/overview/" + flavor + "/" + g[0]).then(function (res) {
+        if (activeFlavor !== flavor) return;
+        var v = (res.ok && res.body.values) || {};
+        Object.keys(v).forEach(function (k) {
+          var el = document.querySelector('#dash-statgrid [data-stat="' + k + '"]');
+          if (!el) return;
+          el.classList.remove("shimmer");
+          el.textContent = fmt(v[k]);
+          el.classList.toggle("dim", v[k] == null);
+        });
+        chips[g[0]].className = res.ok ? "pchip done" : "pchip err";
+      }).catch(function () {
+        if (chips[g[0]]) chips[g[0]].className = "pchip err";
+      }).finally(function () {
+        pending -= 1;
+        if (pending <= 0) {
+          btn.disabled = false; btn.textContent = "Refresh";
+          document.querySelectorAll('#dash-statgrid [data-stat].shimmer').forEach(function (el) {
+            el.classList.remove("shimmer"); el.textContent = "—"; el.classList.add("dim");
+          });
+          var d = new Date();
+          document.getElementById("dash-updated").textContent =
+            "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          setTimeout(function () {
+            if (activeFlavor === flavor) prog.innerHTML = "";
+          }, 1400);
+        }
       });
-      var d = new Date();
-      document.getElementById("dash-updated").textContent =
-        "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }).finally(function () { btn.disabled = false; btn.textContent = "Refresh"; });
+    });
   }
   document.getElementById("dash-refresh").addEventListener("click", function () {
     loadOverview(true);

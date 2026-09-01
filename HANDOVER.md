@@ -92,7 +92,8 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `POST /api/disconnect/{classic\|new}` | drop that connection from the session |
 | `POST /api/refresh/{classic\|new}` | re-poll device up/down using the stored token |
 | `POST /api/webhooks/{classic\|new}` | `{enabled?, regenerate?}` — session-only webhook key toggle |
-| `GET /api/overview/{flavor}` | Account Overview card counts (incl. `apGroups` [classic], `ssids`) |
+| `GET /api/overview/{flavor}` | all card counts in one shot (legacy; UI no longer uses it) |
+| `GET /api/overview/{flavor}/{group}` | one metric group — `clients` \| `devices` \| `sites` \| `subscriptions` \| `ssids` \| `apGroups`; UI fires all 6 in parallel and fills each card as it resolves, with a progress-chip row |
 | `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids — normalized rows |
 | `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid) |
 | `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
