@@ -381,6 +381,47 @@
   }
   #entity-groups .egroup { margin-bottom: 0; }
   .entity-head { margin-bottom: 16px; }
+
+  /* topology */
+  #entity-topo { margin-top: 18px; grid-column: 1 / -1; }
+  .topo-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+  .topo-note { font-size: 11.5px; color: var(--faint); }
+  .topo-wrap {
+    overflow-x: auto; border: 1px solid var(--border); border-radius: 14px;
+    background:
+      radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+      var(--surface);
+    box-shadow: var(--shadow); padding: 8px;
+  }
+  .topo-wrap svg { display: block; height: auto; max-width: 100%; }
+  .topo-link { stroke: var(--border-strong); stroke-width: 1.6; fill: none; }
+  .topo-link.active { stroke: var(--accent); stroke-width: 2.6; stroke-dasharray: 7 6; animation: topoflow .7s linear infinite; }
+  .topo-link.down { stroke: color-mix(in srgb, var(--down) 60%, var(--border-strong)); stroke-dasharray: 3 4; }
+  @keyframes topoflow { to { stroke-dashoffset: -13; } }
+  @media (prefers-reduced-motion: reduce) { .topo-link.active { animation: none; } }
+  .topo-node { cursor: default; }
+  .topo-node.link { cursor: pointer; }
+  .topo-node rect.card {
+    fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.2;
+  }
+  .topo-node.good rect.card { stroke: color-mix(in srgb, var(--ok) 55%, var(--border-strong)); }
+  .topo-node.poor rect.card { stroke: color-mix(in srgb, var(--down) 60%, var(--border-strong)); }
+  .topo-node.focus rect.card { stroke: var(--accent); stroke-width: 2.4; }
+  .topo-node.focus rect.halo { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .topo-node.link:hover rect.card { stroke: var(--accent); }
+  .topo-node text.nm { fill: var(--ink); font-size: 11px; font-weight: 600; }
+  .topo-node text.sub { fill: var(--muted); font-size: 9.5px; font-family: var(--mono); }
+  .topo-node text.dot { font-size: 13px; }
+  .topo-layer-label {
+    fill: var(--faint); font-size: 9.5px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .topo-legend {
+    display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px;
+    font-size: 11px; color: var(--muted);
+  }
+  .topo-legend span { display: flex; align-items: center; gap: 5px; }
+  .topo-legend .sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
   .entity-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
   .entity-sub {
     display: block; margin-top: 3px; font-family: var(--mono);
@@ -724,6 +765,14 @@
             <span class="entity-sub" id="entity-sub"></span>
           </div>
           <div id="entity-groups"></div>
+          <div id="entity-topo" hidden>
+            <div class="topo-head">
+              <span class="panel-head" style="margin:0">Topology</span>
+              <span class="topo-note" id="topo-note"></span>
+            </div>
+            <div class="topo-wrap" id="topo-wrap"></div>
+            <div class="topo-legend" id="topo-legend"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1097,7 +1146,165 @@
         box.appendChild(dl);
         groupsEl.appendChild(box);
       });
+      loadTopology(d.meta || {});
     });
+  }
+
+  /* ---- Topology view ---- */
+  var TOPO_ICON = {
+    internet: "Internet-Cloud.svg", gateway: "Gateway.svg",
+    l3switch: "L3-Switch.svg", l2switch: "L2-Switch.svg", ap: "IndoorAP.svg",
+    other: "L2-Switch.svg", clientWired: "Wired-User.svg", clientWireless: "Mobile-or-Tablet.svg"
+  };
+  var LAYER_NAME = { internet: "Internet", gateway: "Gateway", l3switch: "Core", l2switch: "Access",
+    ap: "Wireless", clientWired: "Client", clientWireless: "Client", other: "Devices" };
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    var e = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function trunc(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+
+  function loadTopology(meta) {
+    var box = document.getElementById("entity-topo");
+    var wrap = document.getElementById("topo-wrap");
+    var note = document.getElementById("topo-note");
+    var legend = document.getElementById("topo-legend");
+    if (!meta.siteId) { box.hidden = true; return; }
+    box.hidden = false;
+    wrap.innerHTML = "";
+    legend.innerHTML = "";
+    note.textContent = "Loading…";
+    api("/api/topology/new/" + encodeURIComponent(meta.siteId)).then(function (res) {
+      if (!res.ok || !res.body.nodes) {
+        note.textContent = (res.body && res.body.error) || "Topology unavailable for this site.";
+        return;
+      }
+      drawTopology(wrap, legend, note, res.body, meta);
+    });
+  }
+
+  function drawTopology(wrap, legend, note, data, meta) {
+    var nodes = {};
+    data.nodes.forEach(function (n) { nodes[n.serial] = { n: n, adj: [] }; });
+    var links = data.links.filter(function (l) { return nodes[l.from] && nodes[l.to]; });
+    links.forEach(function (l) { nodes[l.from].adj.push(l.to); nodes[l.to].adj.push(l.from); });
+
+    nodes.__internet__ = { n: { serial: "__internet__", name: "Internet", type: "internet" }, adj: [] };
+    var conn = Object.keys(nodes).filter(function (s) { return nodes[s].adj.length; });
+    function pick(t) { return conn.filter(function (s) { return nodes[s].n.type === t; })[0]; }
+    var root = pick("gateway") || pick("l3switch") ||
+      conn.sort(function (a, b) { return nodes[b].adj.length - nodes[a].adj.length; })[0];
+    if (root) { nodes.__internet__.adj.push(root); nodes[root].adj.push("__internet__"); }
+    links.push({ from: "__internet__", to: root, synthetic: true });
+
+    var depth = { __internet__: 0 }, parent = {}, q = ["__internet__"], order = ["__internet__"];
+    while (q.length) {
+      var cur = q.shift();
+      nodes[cur].adj.forEach(function (nb) {
+        if (depth[nb] === undefined) { depth[nb] = depth[cur] + 1; parent[nb] = cur; order.push(nb); q.push(nb); }
+      });
+    }
+
+    if (meta.kind === "client" && meta.focusSerial && nodes[meta.focusSerial]) {
+      var dd = depth[meta.focusSerial];
+      nodes.__client__ = { n: { serial: "__client__", name: meta.clientName || "This client",
+        type: meta.connType === "Wired" ? "clientWired" : "clientWireless" }, adj: [meta.focusSerial] };
+      depth.__client__ = (dd === undefined ? 1 : dd + 1);
+      parent.__client__ = meta.focusSerial;
+      order.push("__client__");
+      links.push({ from: meta.focusSerial, to: "__client__", speed: meta.band || "", synthetic: true });
+    }
+
+    var focus = meta.kind === "client" ? "__client__" : meta.focusSerial;
+    var focusMissing = meta.kind !== "site" && (!focus || depth[focus] === undefined);
+    var onPathN = {}, onPathL = {};
+    for (var w = focus; w !== undefined; w = parent[w]) {
+      onPathN[w] = true;
+      if (parent[w] !== undefined) { onPathL[w + "|" + parent[w]] = true; onPathL[parent[w] + "|" + w] = true; }
+    }
+
+    var layers = {};
+    order.forEach(function (s) { (layers[depth[s]] = layers[depth[s]] || []).push(s); });
+    var COLW = 176, ROWH = 116, NW = 148, NH = 62, PADX = 96, PADY = 30;
+    var maxCols = 0, maxL = 0;
+    Object.keys(layers).forEach(function (k) { maxCols = Math.max(maxCols, layers[k].length); maxL = Math.max(maxL, +k); });
+    var width = PADX + maxCols * COLW, height = PADY * 2 + (maxL + 1) * ROWH;
+    var pos = {};
+    Object.keys(layers).forEach(function (k) {
+      var arr = layers[k], y = PADY + k * ROWH + NH / 2;
+      var startX = PADX + (maxCols * COLW - arr.length * COLW) / 2;
+      arr.forEach(function (s, i) { pos[s] = { x: startX + i * COLW + COLW / 2, y: y }; });
+    });
+
+    var svg = el("svg", { viewBox: "0 0 " + width + " " + height, width: width, "font-family": "inherit" });
+
+    // layer labels
+    Object.keys(layers).forEach(function (k) {
+      var types = layers[k].map(function (s) { return nodes[s].n.type; });
+      var name = LAYER_NAME[types[0]] || (k === "0" ? "Internet" : "Devices");
+      svg.appendChild(el("text", { x: 12, y: PADY + k * ROWH + NH / 2 + 3, class: "topo-layer-label" })).textContent = name;
+    });
+
+    // links
+    links.forEach(function (l) {
+      var a = pos[l.from], b = pos[l.to];
+      if (!a || !b) return;
+      var midY = (a.y + b.y) / 2;
+      var p = el("path", { d: "M " + a.x + " " + a.y + " C " + a.x + " " + midY + " " + b.x + " " + midY + " " + b.x + " " + b.y });
+      var cls = "topo-link";
+      if (onPathL[l.from + "|" + l.to]) cls += " active";
+      else if (String(l.health).toLowerCase() === "poor") cls += " down";
+      p.setAttribute("class", cls);
+      var tip = [l.speed, (l.fromPort || l.toPort) ? ((l.fromPort || "?") + " → " + (l.toPort || "?")) : ""]
+        .filter(Boolean).join("  ·  ");
+      if (tip) { var t = el("title", {}); t.textContent = tip; p.appendChild(t); }
+      svg.appendChild(p);
+    });
+
+    // nodes
+    order.forEach(function (s) {
+      var nd = nodes[s].n, p = pos[s];
+      var g = el("g", { class: "topo-node", transform: "translate(" + (p.x - NW / 2) + " " + (p.y - NH / 2) + ")" });
+      var managed = s.indexOf("__") !== 0 && !nd.unmanaged;
+      var cls = "topo-node";
+      if (String(nd.health).toLowerCase() === "good") cls += " good";
+      if (String(nd.health).toLowerCase() === "poor") cls += " poor";
+      if (s === focus) cls += " focus";
+      if (managed) cls += " link";
+      g.setAttribute("class", cls);
+      if (s === focus) g.appendChild(el("rect", { class: "halo", x: -5, y: -5, width: NW + 10, height: NH + 10, rx: 13 }));
+      g.appendChild(el("rect", { class: "card", x: 0, y: 0, width: NW, height: NH, rx: 10 }));
+      var icon = TOPO_ICON[nd.type] || TOPO_ICON.other;
+      var im = el("image", { x: 10, y: NH / 2 - 15, width: 30, height: 30, href: "/static/icons/" + icon });
+      im.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "/static/icons/" + icon);
+      g.appendChild(im);
+      var nm = el("text", { class: "nm", x: 48, y: 24 }); nm.textContent = trunc(nd.name, 18); g.appendChild(nm);
+      var sub = el("text", { class: "sub", x: 48, y: 40 });
+      sub.textContent = trunc(nd.model || nd.ip || (nd.unmanaged ? "unmanaged" : nd.type), 20);
+      g.appendChild(sub);
+      if (managed) {
+        g.style.cursor = "pointer";
+        g.addEventListener("click", function () { openEntity("device", nd.serial, nd.name); });
+      }
+      var tt = el("title", {}); tt.textContent = nd.name + (nd.ip ? " · " + nd.ip : ""); g.appendChild(tt);
+      svg.appendChild(g);
+    });
+
+    wrap.innerHTML = "";
+    wrap.appendChild(svg);
+    var iso = data.isolated || 0;
+    note.textContent = (focusMissing ? "This device has no topology links — showing the site graph. " : "")
+      + (order.length - 1) + " connected node" + (order.length - 1 === 1 ? "" : "s")
+      + (iso ? " · " + iso + " not linked" : "") + " · click a device to open it";
+    legend.innerHTML = "";
+    [["Active path", "var(--accent)"], ["Link", "var(--border-strong)"], ["Degraded", "var(--down)"]]
+      .forEach(function (x) {
+        var sp = document.createElement("span");
+        sp.innerHTML = '<i class="sw" style="background:' + x[1] + '"></i>' + x[0];
+        legend.appendChild(sp);
+      });
   }
 
   function closeDetail() {
