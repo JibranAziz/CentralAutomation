@@ -911,9 +911,12 @@
       document.getElementById(PANEL_IDS[t.id]).hidden = !on;
     });
     if (tab.id === "tab-newcentral" || tab.id === "tab-classic") {
-      mountDashboard(tab.id === "tab-classic" ? "classic" : "new");
+      var F = tab.id === "tab-classic" ? "classic" : "new";
+      var switched = activeFlavor !== F;
+      mountDashboard(F);
+      if (switched) closeDetail();          // any open list/detail belongs to the other flavor
       updateDashboards();
-      loadOverview(false);
+      loadOverview(switched);               // force a reload when the flavor changed
     }
   }
   tabs.forEach(function (t, i) {
@@ -1624,6 +1627,8 @@
   function closeDetail() {
     detailEl.hidden = true;
     overviewEl.hidden = false;
+    if (entityEl) entityEl.hidden = true;
+    if (listEl) listEl.hidden = false;
     dState.entity = null;
   }
 
