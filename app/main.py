@@ -412,6 +412,105 @@ def _site_detail(s: dict[str, Any]) -> dict[str, Any]:
         "subtitle": ", ".join(p for p in (addr.get("city"), addr.get("country")) if p),
         "status": "",
         "groups": [g for g in groups if g],
+        "meta": {"kind": "site", "siteId": s.get("id")},
+    }
+
+
+def _topo_node_type(d: dict[str, Any]) -> str:
+    if d.get("internet"):
+        return "internet"
+    t = str(d.get("type") or "").lower()
+    fn = str(d.get("deviceFunction") or "").lower()
+    nm = str(d.get("name") or "").lower()
+    if "gateway" in t or "gateway" in fn or "controller" in fn:
+        return "gateway"
+    if any(k in nm for k in ("firewall", "gateway", "router", "edge-", " edge", "-fw", "fw-")):
+        return "gateway"
+    if "point" in t or t == "ap" or "iap" in t or nm.startswith("ap-") or "-ap-" in nm:
+        return "ap"
+    if "switch" in t or "switch" in fn or "switch" in nm:
+        if any(k in fn for k in ("core", "aggreg", "distrib", "routing", "l3")):
+            return "l3switch"
+        return "l2switch"
+    return "other"
+
+
+def _fmt_speed(bps: Any) -> str:
+    try:
+        v = float(bps or 0)
+    except (TypeError, ValueError):
+        return ""
+    if v >= 1e9:
+        return f"{v / 1e9:g} Gbps"
+    if v >= 1e6:
+        return f"{v / 1e6:g} Mbps"
+    return ""
+
+
+async def _new_central_topology(host: str, token: str, site_id: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.get(
+                f"https://{host}/network-monitoring/v1/topology/{site_id}", headers=headers)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+    except Exception:
+        return None
+
+    devs = body.get("devices") or []
+    if isinstance(devs, dict):
+        devs = devs.get("items", [])
+    raw_links = body.get("links") or []
+    if isinstance(raw_links, dict):
+        raw_links = raw_links.get("items", [])
+
+    nodes: dict[str, dict[str, Any]] = {}
+    for d in devs:
+        s = d.get("serial")
+        if not s:
+            continue
+        nodes[s] = {
+            "serial": s,
+            "name": d.get("name") or s,
+            "type": _topo_node_type(d),
+            "model": d.get("model") or "",
+            "function": d.get("deviceFunction") or "",
+            "ip": d.get("ipv4") or "",
+            "mac": d.get("mac") or "",
+            "status": d.get("status") or "",
+            "health": d.get("health") or "",
+        }
+
+    links: list[dict[str, Any]] = []
+    for lk in raw_links:
+        f, t = lk.get("from"), lk.get("to")
+        if not f or not t:
+            continue
+        for endp in (f, t):
+            if endp not in nodes:
+                unmanaged = str(endp).startswith("tpd_")
+                nodes[endp] = {
+                    "serial": endp,
+                    "name": "Unmanaged device" if unmanaged else str(endp),
+                    "type": "other", "model": "", "function": "",
+                    "ip": "", "mac": "", "status": "", "health": "",
+                    "unmanaged": True,
+                }
+        links.append({
+            "from": f, "to": t,
+            "speed": _fmt_speed(lk.get("speed")),
+            "edgeType": lk.get("edgeType") or "",
+            "fromPort": ((lk.get("fromPortList") or [{}])[0] or {}).get("name") or "",
+            "toPort": ((lk.get("toPortList") or [{}])[0] or {}).get("name") or "",
+            "health": lk.get("health") or "",
+        })
+
+    return {
+        "nodes": list(nodes.values()),
+        "links": links,
+        "isolated": body.get("isolatedDevicesCount", 0),
     }
 
 
@@ -502,6 +601,15 @@ def _client_detail(c: dict[str, Any]) -> dict[str, Any]:
         "subtitle": c.get("macAddress") or "",
         "status": c.get("status") or "",
         "groups": [g for g in groups if g],
+        "meta": {
+            "kind": "client",
+            "siteId": c.get("siteId"),
+            "focusSerial": c.get("connectedDeviceSerial"),
+            "clientName": name,
+            "clientMac": c.get("macAddress"),
+            "connType": c.get("clientConnectionType"),
+            "band": c.get("wirelessBand"),
+        },
     }
 
 
@@ -544,6 +652,11 @@ def _device_detail(d: dict[str, Any], client_count: Optional[int]) -> dict[str, 
         "subtitle": (d.get("model") or "") + (" · " + d.get("serialNumber") if d.get("serialNumber") else ""),
         "status": "Up" if online else "Down",
         "groups": [g for g in groups if g],
+        "meta": {
+            "kind": "device",
+            "siteId": d.get("siteId"),
+            "focusSerial": d.get("serialNumber"),
+        },
     }
 
 
@@ -805,6 +918,20 @@ async def detail_new(kind: str, ident: str, request: Request) -> JSONResponse:
     if data is None:
         return _err(404, f"No {kind} found for '{ident}'.")
     return JSONResponse({"detail": data})
+
+
+@app.get("/api/topology/new/{site_id}")
+async def topology_new(site_id: str, request: Request) -> JSONResponse:
+    sess = _get(request)
+    conn = sess.get("new") if sess else None
+    if not conn:
+        return _err(409, "Connect New Central first.")
+    if conn.get("expires_at", 0) < _now():
+        return _err(401, "The access token has expired — reconnect New Central.")
+    data = await _new_central_topology(conn["host"], conn["access_token"], site_id)
+    if data is None:
+        return _err(502, "Central did not return topology for this site.")
+    return JSONResponse(data)
 
 
 @app.post("/api/refresh/{kind}")

@@ -94,7 +94,8 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `POST /api/webhooks/{classic\|new}` | `{enabled?, regenerate?}` — session-only webhook key toggle |
 | `GET /api/overview/new` | Account Overview card counts |
 | `GET /api/list/new/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions — normalized rows |
-| `GET /api/detail/new/{client\|device}/{id}` | grouped detail; client id = MAC, device id = serial |
+| `GET /api/detail/new/{client\|device\|site}/{id}` | grouped detail + `meta` (siteId, focusSerial); client id = MAC, device id = serial, site id = site id |
+| `GET /api/topology/new/{site-id}` | normalized `{nodes, links, isolated}` for the topology diagram |
 
 ## Aruba Central API usage (upstream)
 
@@ -128,6 +129,26 @@ curl -sk https://centralautomation.arubademo.online/healthz \
   top-level `health` (percent good), and `reasons[]` (e.g. `DEVICE_OFFLINE`).
   The Sites table shows the client/device health triplets; a row opens a site
   detail (overview, client/device health, address, lat/long).
+- **Topology**: `GET /network-monitoring/v1/topology/{site-id}` →
+  `devices[]` (serial, name, type, model, deviceFunction, ipv4, mac, status,
+  health; unmanaged neighbours have `tpd_<mac>` serials and a friendly name) and
+  `links[]` (from/to serial, speed bps, edgeType, from/toPortList, health,
+  isSibling), plus `isolatedDevicesCount`. There is **no internet/gateway node** —
+  the client-side diagram synthesises an Internet node, picks a root
+  (gateway → L3 switch → highest-degree), BFS-layers the graph, and highlights
+  the focused device/client's path to the Internet. Icons come from
+  `app/static/icons/` (the `~/images/` set). See the assets memory.
+
+## Topology view (frontend)
+
+`loadTopology(meta)` in `index.html` runs at the bottom of the entity-detail
+render. It fetches the site topology, builds an adjacency graph, adds a synthetic
+`__internet__` node (and `__client__` for client details), BFS-layers from the
+root, and draws an inline SVG: rounded node cards with per-type icons and
+health-coloured borders, curved links, an animated dashed "active path" from the
+focus node up to the Internet, hover tooltips (speed + ports), and clickable
+managed nodes that open that device's detail. Isolated devices (no LLDP links)
+are counted in the caption, not drawn.
 - Per-device client counts are joined client→device via `connectedDeviceSerial`.
 - Sites: `GET /network-monitoring/v1/sites-health` (offset/limit) → `total`.
 - Subscriptions: `GET https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions`
