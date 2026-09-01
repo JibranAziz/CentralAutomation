@@ -1003,7 +1003,6 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "gateways": "/monitoring/v1/gateways",
         "sites": "/central/v2/sites",
         "subscriptions": "/platform/licensing/v1/subscriptions",
-        "ssids": "/monitoring/v1/networks",
     }
 
     async def _count_groups(client):
@@ -1037,6 +1036,11 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         if cw is not None or cd is not None:
             out["clients"] = (cw or 0) + (cd or 0)
         out["apGroups"] = results[-1]
+    except Exception:
+        pass
+    try:
+        smap = await _classic_ssid_map(host, token)
+        out["ssids"] = len(smap) if smap else None
     except Exception:
         pass
     return out
@@ -1144,17 +1148,10 @@ async def _classic_central_list(host: str, token: str, entity: str
                     row["clients"] = counts.get(row["serial"])
                 rows.append(row)
         elif entity == "ssids":
-            raw, seen = [], False
-            for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
-                r, _t, sc = await _fetch_all(
-                    client, f"https://{host}{path}", headers, style="offset",
-                    params={"limit": "1000", "calculate_total": "true"}, item_key="networks")
-                if sc == 200 or r:
-                    seen, raw = True, r
-                    break
-            if not seen:
+            smap = await _classic_ssid_map(host, token)
+            if not smap:
                 return None, 0
-            rows = [_classic_norm_ssid(x) for x in raw]
+            rows = [_ssid_row(nm, e) for nm, e in sorted(smap.items(), key=lambda x: x[0].lower())]
         elif entity == "ap-groups":
             names, _sc = await _classic_group_names(client, host, headers)
             dc = await _classic_group_device_counts(client, host, headers)
@@ -1345,48 +1342,97 @@ async def _classic_central_site_detail(host: str, token: str, site_id: str) -> O
     }
 
 
-def _classic_norm_ssid(n: dict[str, Any]) -> dict[str, Any]:
+async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
+    """All SSIDs across every AP group (config) merged with monitoring stats."""
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    out: dict[str, dict[str, Any]] = {}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        names, _sc = await _classic_group_names(client, host, headers)
+
+        async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]]]:
+            for path in (f"/configuration/v2/wlan/{quote(g, safe='')}",
+                         f"/configuration/v1/wlan/{quote(g, safe='')}"):
+                try:
+                    r = await client.get(f"https://{host}{path}", headers=headers)
+                except Exception:
+                    continue
+                if r.status_code != 200:
+                    continue
+                body = r.json() if r.content else {}
+                wl = body.get("wlans") or body.get("data") or body.get("ssids") or []
+                res: list[tuple[str, str, str]] = []
+                for w in wl:
+                    if isinstance(w, str):
+                        res.append((w, "", ""))
+                    elif isinstance(w, dict):
+                        nm = _pick(w, "name", "essid", "ssid", "profile-name")
+                        if nm:
+                            res.append((nm,
+                                        _pick(w, "opmode", "security", "key_management", default=""),
+                                        _pick(w, "type", "access_type", default="")))
+                return g, res
+            return g, []
+
+        for g, res in await asyncio.gather(*[_grp(n) for n in (names or [])]):
+            for nm, sec, typ in res:
+                e = out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
+                e["groups"].add(g)
+                if sec and not e["security"]:
+                    e["security"] = sec
+                if typ and not e["type"]:
+                    e["type"] = typ
+
+        for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
+            raw, _t, sc = await _fetch_all(
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000"}, item_key="networks")
+            if sc == 200 or raw:
+                for n in raw:
+                    nm = _pick(n, "essid", "name", "network", "ssid")
+                    if nm:
+                        out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
+                        out[nm]["mon"] = n
+                break
+    return out
+
+
+def _ssid_row(name: str, e: dict[str, Any]) -> dict[str, Any]:
+    m = e.get("mon") or {}
     return {
-        "name": _pick(n, "essid", "name", "network", "ssid", default="—"),
-        "status": "Enabled" if _pick(n, "enabled", "is_enabled", default=True) else "Disabled",
-        "security": _pick(n, "security", "security_type", "key_management", "opmode", default="—"),
-        "securityLevel": _pick(n, "type", "wlan_type", "profile_type", default="—"),
-        "band": _pick(n, "band", default="—"),
-        "vlan": str(_pick(n, "vlan", "vlan_id", default="—")),
-        "clients": _pick(n, "client_count", "num_clients", "clients", "associated_client_count"),
+        "name": name,
+        "status": "Enabled" if _pick(m, "enabled", "is_enabled", default=True) else "Disabled",
+        "security": e.get("security") or _pick(m, "security", "security_type", default="—"),
+        "securityLevel": e.get("type") or _pick(m, "type", "wlan_type", default="—"),
+        "band": _pick(m, "band", default="—"),
+        "vlan": str(_pick(m, "vlan", "vlan_id", default="—")),
+        "clients": _pick(m, "client_count", "num_clients", "clients", "associated_client_count"),
+        "groups": ", ".join(sorted(e.get("groups", []))) or "—",
     }
 
 
 async def _classic_central_ssid_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    smap = await _classic_ssid_map(host, token)
+    e = smap.get(name)
+    if e is None:
+        return None
+    row = _ssid_row(name, e)
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    net = None
+    members: list[dict[str, str]] = []
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
-            raw, _t, _sc = await _fetch_all(
-                client, f"https://{host}{path}", headers, style="offset",
-                params={"limit": "1000"}, item_key="networks")
-            net = next((x for x in raw
-                        if _pick(x, "essid", "name", "network", "ssid") == name), None)
-            if net is not None:
-                break
-        if net is None:
-            return None
-        members: list[dict[str, str]] = []
-        craw, _t2, _sc2 = await _fetch_all(
+        craw, _t, _sc = await _fetch_all(
             client, f"https://{host}/monitoring/v1/clients/wireless", headers, style="offset",
             params={"limit": "1000"}, item_key="clients")
-        for c in craw:
-            if _pick(c, "network", "ssid", "essid") == name:
-                members.append({
-                    "name": _pick(c, "name", "hostname", "macaddr", default="?"),
-                    "serial": _pick(c, "macaddr", default=""),
-                    "category": "client", "kind": "client", "status": "Connected",
-                })
-    row = _classic_norm_ssid(net)
+    for c in craw:
+        if _pick(c, "network", "ssid", "essid") == name:
+            members.append({
+                "name": _pick(c, "name", "hostname", "macaddr", default="?"),
+                "serial": _pick(c, "macaddr", default=""),
+                "category": "client", "kind": "client", "status": "Connected",
+            })
     groups = [
         _kv_group("Configuration", row, [
             ("status", "Status"), ("security", "Security"), ("securityLevel", "Type"),
-            ("band", "Bands"), ("vlan", "VLAN"),
+            ("band", "Bands"), ("vlan", "VLAN"), ("groups", "AP groups"),
         ]),
         _kv_group("Clients", {"c": row["clients"], "n": len(members)}, [
             ("c", "Reported client count"), ("n", "Connected now"),
