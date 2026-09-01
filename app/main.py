@@ -818,9 +818,12 @@ CLASSIC_SOURCES = {
     "switches": ("/monitoring/v1/switches", "switches"),
     "gateways": ("/monitoring/v1/gateways", "gateways"),
 }
-# Classic v2 clients: one call per client_type; timerange is required.
-CLASSIC_CLIENT_TYPES = (("WIRELESS", False), ("WIRED", True))
-CLASSIC_CLIENT_PARAMS = {"timerange": "3H"}
+# Classic clients live on split v1 endpoints (v2/clients returned empty on the
+# tenant tested); wired vs wireless is which endpoint, not a field.
+CLASSIC_CLIENT_SOURCES = (
+    ("/monitoring/v1/clients/wireless", False),
+    ("/monitoring/v1/clients/wired", True),
+)
 
 
 def _classic_norm_client(c: dict[str, Any], wired: bool) -> dict[str, Any]:
@@ -856,17 +859,33 @@ def _classic_norm_device(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _epoch_date(v: Any) -> str:
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return str(v or "")[:10]
+    if n > 1e12:  # milliseconds
+        n /= 1000.0
+    if n <= 0:
+        return ""
+    try:
+        return time.strftime("%Y-%m-%d", time.gmtime(n))
+    except (ValueError, OSError):
+        return ""
+
+
 def _classic_norm_sub(s: dict[str, Any]) -> dict[str, Any]:
     return {
-        "description": _pick(s, "sku_description", "description", "license_type",
-                             "subscription_type", default="—"),
+        "description": _pick(s, "license_type", "sku_description", "description",
+                             "acpapp_name", "subscription_type", default="—"),
         "sku": _pick(s, "sku", "subscription_key", default="—"),
         "tier": _pick(s, "license_type", "tier", "subscription_type", default="—"),
         "quantity": _pick(s, "quantity", "total", default="—"),
-        "available": _pick(s, "available_quantity", "available", default="—"),
+        "available": _pick(s, "available", "available_quantity", default="—"),
         "status": _pick(s, "status", "subscription_status", default="—"),
-        "end": str(_pick(s, "end_date", "expiry", default=""))[:10] or "—",
-        "eval": "Eval" if _pick(s, "is_eval", "evaluation", default=False) else "—",
+        "end": _epoch_date(_pick(s, "end_date", "expiry", default="")) or "—",
+        "eval": "Eval" if str(_pick(s, "subscription_type", default="")).upper() == "EVAL"
+                or _pick(s, "is_eval", default=False) else "—",
     }
 
 
@@ -921,6 +940,15 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "sites": "/central/v2/sites",
         "subscriptions": "/platform/licensing/v1/subscriptions",
     }
+    async def _count_rows(client, path):
+        try:
+            rows, _t, sc = await _fetch_all(
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000"}, item_key="clients")
+            return len(rows) if (sc == 200 or rows) else None
+        except Exception:
+            return None
+
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
             calls = [
@@ -928,11 +956,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
                            {"limit": "1", "calculate_total": "true"})
                 for p in probes.values()
             ]
-            calls += [
-                _get_total(client, f"https://{host}/monitoring/v2/clients", headers,
-                           {"limit": "1", "timerange": "3H", "client_type": ct})
-                for ct, _ in CLASSIC_CLIENT_TYPES
-            ]
+            calls += [_count_rows(client, p) for p, _ in CLASSIC_CLIENT_SOURCES]
             results = await asyncio.gather(*calls)
         for key, val in zip(probes.keys(), results):
             out[key] = val
@@ -950,10 +974,10 @@ async def _classic_central_list(host: str, token: str, entity: str
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         if entity == "clients":
             rows, seen = [], False
-            for ct, wired in CLASSIC_CLIENT_TYPES:
+            for path, wired in CLASSIC_CLIENT_SOURCES:
                 raw, _t, sc = await _fetch_all(
-                    client, f"https://{host}/monitoring/v2/clients", headers, style="offset",
-                    params={"limit": "1000", "timerange": "3H", "client_type": ct}, item_key="clients")
+                    client, f"https://{host}{path}", headers, style="offset",
+                    params={"limit": "1000"}, item_key="clients")
                 if sc == 200 or raw:
                     seen = True
                     rows += [_classic_norm_client(x, wired) for x in raw]
@@ -966,7 +990,21 @@ async def _classic_central_list(host: str, token: str, entity: str
                 params={"limit": "1000", "calculate_total": "true"}, item_key=key)
             if sc != 200 and not raw:
                 return None, 0
-            rows = [_classic_norm_device(x) for x in raw]
+            counts: dict[str, int] = {}
+            for cpath, _w in CLASSIC_CLIENT_SOURCES:
+                craw, _t, _sc = await _fetch_all(
+                    client, f"https://{host}{cpath}", headers, style="offset",
+                    params={"limit": "1000"}, item_key="clients")
+                for c in craw:
+                    dev = _pick(c, "associated_device", "associated_device_mac")
+                    if dev:
+                        counts[dev] = counts.get(dev, 0) + 1
+            rows = []
+            for x in raw:
+                row = _classic_norm_device(x)
+                if row["clients"] is None:
+                    row["clients"] = counts.get(row["serial"])
+                rows.append(row)
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -1022,10 +1060,10 @@ async def _classic_central_client_detail(host: str, token: str, mac: str) -> Opt
     raw, wired = None, False
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        for ct, is_wired in CLASSIC_CLIENT_TYPES:
+        for path, is_wired in CLASSIC_CLIENT_SOURCES:
             rows, _t, _sc = await _fetch_all(
-                client, f"https://{host}/monitoring/v2/clients", headers, style="offset",
-                params={"limit": "1000", "timerange": "3H", "client_type": ct}, item_key="clients")
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000"}, item_key="clients")
             hit = next((c for c in rows if str(_pick(c, "macaddr", "mac_address", default="")).lower() == mac.lower()), None)
             if hit:
                 raw, wired = hit, is_wired

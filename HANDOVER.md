@@ -99,34 +99,40 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 
 ## Aruba Central API usage (upstream)
 
-### Classic Central — **not yet tested with real credentials**
+### Classic Central — verified live 2026-09-01 (tenant: internal-apigw)
 
 - Token: `POST https://{baseUrl}/oauth2/token` with **query params**
-  `client_id, client_secret, grant_type=refresh_token, refresh_token`.
-- Base-URL dropdown values are region API-gateway hostnames (`internal-apigw…`,
-  `app1-apigw…`, `apigw-prod2…`, `eu-apigw…`, …).
-- The **full dashboard** (overview / lists / detail / topology) is wired to these
-  legacy monitoring endpoints, mapped by `_classic_*` in `main.py` to the same
-  normalized shapes as New Central:
-  - device/site/subscription counts: `?limit=1&calculate_total=true` → `total` on
-    `/monitoring/v2/aps`, `/monitoring/v1/switches`, `/monitoring/v1/gateways`,
+  `client_id, client_secret, grant_type=refresh_token, refresh_token`. **Refresh
+  tokens are single-use / rotate** — each `oauth2/token` call consumes one, so
+  don't probe with the user's live token or their browser session breaks at the
+  next 2 h access-token refresh.
+- Base-URL dropdown values are region API-gateway hostnames.
+- Full dashboard is wired to the legacy monitoring APIs, mapped by `_classic_*`:
+  - AP/switch/gateway/site/subscription counts: `?limit=1&calculate_total=true`
+    → `total` on `/monitoring/v2/aps`, `/monitoring/v1/{switches,gateways}`,
     `/central/v2/sites`, `/platform/licensing/v1/subscriptions`
-  - **clients**: `/monitoring/v2/clients` — `timerange` (req, `3H`) + `client_type`
-    (`WIRELESS`/`WIRED`); TWO calls per view, merged; wired/wireless comes from
-    which call, not a field. `band` is like `"5 Ghz"`.
-  - lists: device paths use `offset`/`limit`, list key per entity
-    (`aps`/`switches`/`gateways`); clients as above; `sites`/`subscriptions` too
-  - site health merged from `/branchhealth/v1/site`
-  - **topology**: `GET /topology_external_api/{site_id}` (int site id) →
-    `{devices, edges (fromIf/toIf), tunnels, rootNodes}`; `role` ∈
-    IAP/Switch/Controller/VPNC/SECURITYCLOUD. `rootNodes` is passed to the client
-    as `roots` and the diagram uses it as the layout root.
-  - Classic device/client items carry a site *name*, not id — `_classic_resolve_site_id`
-    looks the numeric id up from `/central/v2/sites` for topology.
-  - client/device/site detail: found by scanning the list responses
-- Confirmed live 2026-09-01: overview (APs/switches/gateways/sites/subscriptions),
-  device detail. Clients + topology reworked per the API docs but **not re-verified
-  live yet**. Other field names still `_pick()`-guessed.
+  - **clients**: `/monitoring/v1/clients/wireless` + `/monitoring/v1/clients/wired`
+    (v2/clients returned empty). Two calls, merged; wired/wireless = which call.
+    `band` is a **float** (2.4 / 5 / 6). Fields: `macaddr`, `hostname`/`name`,
+    `ip_address`, `vlan`, `channel`, `snr`, `associated_device`(serial) /
+    `associated_device_name`, `os_type`, `site`(name).
+  - device lists: `offset`/`limit`, list key `aps`/`switches`/`gateways`; AP items
+    have **no client_count** — joined from the clients list via `associated_device`.
+  - sites: `/central/v2/sites` (`site_id` int) + health merged from
+    `/branchhealth/v1/site` items (keyed by `name`; `device_up/down`,
+    `connected_count`, `failed_count`).
+  - subscriptions: `/platform/licensing/v1/subscriptions` (`total` works); item
+    `license_type`, `sku`, `quantity`, `available`, `status`, `end_date` (epoch ms
+    → `_epoch_date`), `subscription_type` ("EVAL").
+  - **topology**: `GET /topology_external_api/{site_id}` (int id) →
+    `{devices, edges(fromIf/toIf), tunnels, rootNodes}`; `role` ∈
+    IAP/Switch/Controller/VPNC/SECURITYCLOUD → node type; `rootNodes` → `roots`,
+    used as the diagram's layout root.
+  - Classic device/client items carry a site *name* (or `site_id` on switches);
+    `_classic_resolve_site_id` maps name → numeric id via `/central/v2/sites`.
+  - client/device/site detail: found by scanning the list responses.
+- AOS-8 Instant APs with no site assignment return an empty siteId → their
+  topology section shows "unavailable" (expected).
 
 ### Dashboard wiring (frontend)
 
@@ -187,10 +193,9 @@ the connecting link carries a label with band + SNR.
 
 ## Known gaps / TODO
 
-- Classic Central: full dashboard is built but the whole upstream path (connect
-  + every monitoring API + field names) is untested against a real Classic token.
-- New Central token lifetime is ~2 h; `/api/refresh` and `/api/list` return 401
-  once it expires and the user must reconnect. No server-side token refresh.
+- Both New and Classic tokens are held as-issued; there is **no server-side token
+  refresh**, so `/api/*` calls 401 after ~2 h and the user reconnects. Classic
+  additionally rotates the refresh token on every use.
 - `LIST_CAP = 6000` rows per entity.
 - Front nginx passthrough config lives outside this repo.
 
