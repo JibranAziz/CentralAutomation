@@ -1367,8 +1367,8 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]]]:
           async with sem:
-            for path in (f"/configuration/v2/wlan/{quote(g, safe='')}",
-                         f"/configuration/v1/wlan/{quote(g, safe='')}"):
+            for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
+                         f"/configuration/v2/wlan/{quote(g, safe='')}"):
                 r = await _retry_get(client, f"https://{host}{path}", headers)
                 if r is None or r.status_code != 200:
                     continue
@@ -1457,10 +1457,18 @@ async def _classic_central_ssid_detail(host: str, token: str, name: str) -> Opti
     row = _ssid_row(name, e)
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     members: list[dict[str, str]] = []
+    wcfg: dict[str, Any] = {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         craw, _t, _sc = await _fetch_all(
             client, f"https://{host}/monitoring/v1/clients/wireless", headers, style="offset",
             params={"limit": "1000"}, item_key="clients")
+        grp = sorted(e.get("groups", []))
+        if grp:
+            r = await _retry_get(
+                client, f"https://{host}/configuration/v1/wlan/{quote(grp[0], safe='')}/{quote(name, safe='')}",
+                headers)
+            if r is not None and r.status_code == 200:
+                wcfg = (r.json() or {}).get("wlan") or {}
     for c in craw:
         if _pick(c, "network", "ssid", "essid") == name:
             members.append({
@@ -1468,10 +1476,21 @@ async def _classic_central_ssid_detail(host: str, token: str, name: str) -> Opti
                 "serial": _pick(c, "macaddr", default=""),
                 "category": "client", "kind": "client", "status": "Connected",
             })
+    cfg = {
+        "essid": _pick(wcfg, "essid") or name,
+        "type": _pick(wcfg, "type") or row["securityLevel"],
+        "vlan": str(_pick(wcfg, "vlan") or row["vlan"]),
+        "hidden": "Yes" if _pick(wcfg, "hide_ssid") else "No" if wcfg else "—",
+        "passphrase": "Set" if _pick(wcfg, "wpa_passphrase") else "—",
+        "captive": _pick(wcfg, "captive_profile_name"),
+        "zone": _pick(wcfg, "zone"),
+    }
     groups = [
-        _kv_group("Configuration", row, [
-            ("status", "Status"), ("security", "Security"), ("securityLevel", "Type"),
-            ("band", "Bands"), ("vlan", "VLAN"), ("groups", "AP groups"),
+        _kv_group("Configuration", {**row, **cfg}, [
+            ("status", "Status"), ("type", "Type"), ("security", "Security"),
+            ("band", "Bands"), ("vlan", "VLAN"), ("hidden", "Hidden SSID"),
+            ("passphrase", "Passphrase"), ("captive", "Captive portal"), ("zone", "Zone"),
+            ("groups", "AP groups"),
         ]),
         _kv_group("Clients", {"c": row["clients"], "n": len(members)}, [
             ("c", "Reported client count"), ("n", "Connected now"),
