@@ -121,7 +121,13 @@ curl -sk https://centralautomation.arubademo.online/healthz \
   `status eq 'Connected'`. `wirelessBand` = "2.4 GHz" / "5 GHz" / "6 GHz" (null
   for wired). `wirelessChannel`, `snr`, `vlanId`, `clientOperatingSystem`, `port`.
 - Single client: `GET /network-monitoring/v1/clients/{mac}` works.
-  **No per-serial device route** — device detail is found by scanning the list.
+  **No per-serial device route and no per-id site route** — device and site
+  detail are found by scanning their list responses.
+- Sites: each `sites-health` item carries `clients`/`devices` objects
+  (`{count, health.groups[Poor/Fair/Good]}`), an `alerts.totalCount`, a
+  top-level `health` (percent good), and `reasons[]` (e.g. `DEVICE_OFFLINE`).
+  The Sites table shows the client/device health triplets; a row opens a site
+  detail (overview, client/device health, address, lat/long).
 - Per-device client counts are joined client→device via `connectedDeviceSerial`.
 - Sites: `GET /network-monitoring/v1/sites-health` (offset/limit) → `total`.
 - Subscriptions: `GET https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions`
