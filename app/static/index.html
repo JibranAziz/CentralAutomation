@@ -379,6 +379,24 @@
     gap: 12px; align-items: start;
   }
   #entity-groups .egroup { margin-bottom: 0; }
+  #entity-groups .egroup.wide { grid-column: 1 / -1; }
+  .member-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 8px; padding: 10px 15px 14px;
+  }
+  .member {
+    display: flex; align-items: center; gap: 9px; text-align: left;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 8px 10px; cursor: pointer; font-family: inherit;
+    transition: border-color .12s, background .12s;
+  }
+  .member:hover { border-color: var(--accent); background: var(--surface); }
+  .member[disabled] { cursor: default; opacity: .6; }
+  .member img { flex: none; }
+  .member .m-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .member .mn { font-size: 12px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .member .ms { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .member .m-pill { flex: none; }
   .entity-head { margin-bottom: 16px; }
 
   /* topology */
@@ -1179,9 +1197,47 @@
         box.appendChild(dl);
         groupsEl.appendChild(box);
       });
+
+      var mem = d.devices || [];
+      if (mem.length) {
+        var mbox = document.createElement("div");
+        mbox.className = "egroup wide";
+        var mh = document.createElement("h4");
+        mh.textContent = "Members · " + mem.length;
+        mbox.appendChild(mh);
+        var grid = document.createElement("div");
+        grid.className = "member-grid";
+        mem.forEach(function (m) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "member";
+          var icon = MEMBER_ICON[m.category] || MEMBER_ICON.other;
+          var im = document.createElement("img");
+          im.src = "/static/icons/" + icon; im.alt = ""; im.width = 22; im.height = 22;
+          var tx = document.createElement("span");
+          tx.className = "m-text";
+          var mn = document.createElement("span"); mn.className = "mn"; mn.textContent = m.name;
+          var ms = document.createElement("span"); ms.className = "ms"; ms.textContent = m.serial || m.category;
+          tx.appendChild(mn); tx.appendChild(ms);
+          b.appendChild(im); b.appendChild(tx);
+          if (m.status) {
+            var sp = pill(m.status); sp.classList.add("m-pill"); b.appendChild(sp);
+          }
+          if (m.serial) {
+            b.addEventListener("click", function () { openEntity("device", m.serial, m.name); });
+          } else {
+            b.disabled = true;
+          }
+          grid.appendChild(b);
+        });
+        mbox.appendChild(grid);
+        groupsEl.appendChild(mbox);
+      }
+
       loadTopology(d.meta || {});
     });
   }
+  var MEMBER_ICON = { ap: "IndoorAP.svg", switch: "L2-Switch.svg", gateway: "Gateway.svg", other: "L2-Switch.svg" };
 
   /* ---- Topology view ---- */
   var TOPO_ICON = {

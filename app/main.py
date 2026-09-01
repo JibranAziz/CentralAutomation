@@ -1269,22 +1269,33 @@ async def _classic_central_site_detail(host: str, token: str, site_id: str) -> O
     }
 
 
+def _humanize(k: str) -> str:
+    s = re.sub(r"(?<!^)(?=[A-Z])", " ", str(k)).replace("_", " ").strip()
+    return s[:1].upper() + s[1:] if s else str(k)
+
+
 async def _classic_central_group_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     props: dict[str, Any] = {}
-    devices: list[str] = []
+    members: list[dict[str, str]] = []
     counts = {"aps": 0, "switches": 0, "gateways": 0}
+    cat_kind = {"aps": "ap", "switches": "switch", "gateways": "gateway"}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        try:
-            r = await client.get(
-                f"https://{host}/configuration/v2/groups/{quote(name, safe='')}/properties",
-                headers=headers)
-            if r.status_code == 200:
-                data = (r.json() or {}).get("data") or []
-                if data and isinstance(data[0], dict):
-                    props = data[0].get("properties") or data[0]
-        except Exception:
-            pass
+        for ppath in (f"/configuration/v2/groups/{quote(name, safe='')}/properties",
+                      f"/configuration/v1/groups/{quote(name, safe='')}/properties"):
+            try:
+                r = await client.get(f"https://{host}{ppath}", headers=headers)
+            except Exception:
+                continue
+            if r.status_code != 200:
+                continue
+            body = r.json() if r.content else {}
+            data = body.get("data") or []
+            if data and isinstance(data[0], dict):
+                props = data[0].get("properties") or {k: v for k, v in data[0].items() if k != "group"}
+            elif isinstance(body.get("properties"), dict):
+                props = body["properties"]
+            break
         for cat, path, key in (("aps", "/monitoring/v2/aps", "aps"),
                                ("switches", "/monitoring/v1/switches", "switches"),
                                ("gateways", "/monitoring/v1/gateways", "gateways")):
@@ -1294,35 +1305,29 @@ async def _classic_central_group_detail(host: str, token: str, name: str) -> Opt
             for d in raw:
                 if _pick(d, "group_name", "group") == name:
                     counts[cat] += 1
-                    if len(devices) < 40:
-                        devices.append(_pick(d, "name", "serial", default="?"))
+                    members.append({
+                        "name": _pick(d, "name", "serial", default="?"),
+                        "serial": _pick(d, "serial", "serial_number", default=""),
+                        "category": cat_kind[cat],
+                        "status": "Up" if _classic_up(_pick(d, "status", "state", default="")) else "Down",
+                    })
 
     def _prop(v: Any) -> Any:
-        return ", ".join(map(str, v)) if isinstance(v, list) else v
+        return ", ".join(map(str, v)) if isinstance(v, (list, tuple)) else v
 
-    prop_src = {k: _prop(v) for k, v in props.items()}
-    summary = {"aps": counts["aps"], "switches": counts["switches"],
-               "gateways": counts["gateways"], "devices": ", ".join(devices) or "—"}
+    prop_src = {k: _prop(v) for k, v in props.items() if v not in (None, "", [], {})}
     groups = [
-        _kv_group("Devices", summary, [
-            ("aps", "Access points"), ("switches", "Switches"), ("gateways", "Gateways"),
-            ("devices", "Members"),
-        ]),
-        _kv_group("Properties", prop_src, [
-            ("Architecture", "Architecture"), ("AOSVersion", "AOS version"),
-            ("ApNetworkRole", "AP network role"), ("GwNetworkRole", "Gateway network role"),
-            ("MonitorOnly", "Monitor only"), ("AllowedDevTypes", "Allowed device types"),
-            ("AllowedSwitchTypes", "Allowed switch types"), ("NewCentral", "New Central"),
-            ("Persona", "Persona"), ("GroupType", "Group type"),
-        ]),
+        _kv_group("Devices", {"aps": counts["aps"], "switches": counts["switches"],
+                              "gateways": counts["gateways"]},
+                  [("aps", "Access points"), ("switches", "Switches"), ("gateways", "Gateways")]),
+        _kv_group("Group properties", prop_src, [(k, _humanize(k)) for k in prop_src]),
     ]
-    if not any(groups):
-        return None
     return {
         "title": name,
         "subtitle": "Configuration group",
         "status": "",
         "groups": [g for g in groups if g],
+        "devices": members,
         "meta": {"kind": "group"},
     }
 
