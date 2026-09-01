@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aruba Central Automation</title>
 <meta name="color-scheme" content="light dark">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cg fill='none' stroke='%2312876a' stroke-width='3.4' stroke-linecap='round'%3E%3Cpath d='M4 12a18 18 0 0 1 24 0'/%3E%3Cpath d='M9 18a11 11 0 0 1 14 0'/%3E%3C/g%3E%3Ccircle cx='16' cy='24' r='2.7' fill='%2312876a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -101,12 +101,11 @@
   }
 
   .masthead { text-align: center; margin-bottom: 34px; }
-  .mark { display: inline-flex; align-items: flex-end; gap: 3px; height: 30px; margin-bottom: 14px; }
-  .mark i { display: block; width: 0; height: 0; border-style: solid; }
-  .mark i:nth-child(1) { border-width: 0 0 12px 12px; border-color: transparent transparent var(--ink) transparent; }
-  .mark i:nth-child(2) { border-width: 0 0 20px 20px; border-color: transparent transparent var(--ink) transparent; }
-  .mark i:nth-child(3) { border-width: 0 0 28px 28px; border-color: transparent transparent var(--ink) transparent; }
-  .mark svg { margin-left: 4px; align-self: flex-start; }
+  .logo {
+    display: block; margin: 0 auto 12px; width: 88px; height: 88px;
+    border-radius: 20px; object-fit: cover;
+    box-shadow: 0 6px 20px -8px #1b243233;
+  }
   h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
   .masthead p { margin: 6px 0 0; color: var(--muted); font-size: 13.5px; }
 
@@ -470,14 +469,7 @@
 <body>
 <div class="wrap">
   <header class="masthead">
-    <span class="mark" aria-hidden="true">
-      <i></i><i></i><i></i>
-      <svg width="20" height="16" viewBox="0 0 20 16" fill="none">
-        <path d="M2 5.5C6.5 1.5 13.5 1.5 18 5.5" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/>
-        <path d="M5.5 9C8 6.8 12 6.8 14.5 9" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/>
-        <circle cx="10" cy="12.5" r="1.8" fill="var(--accent)"/>
-      </svg>
-    </span>
+    <img class="logo" src="/static/logo.jpg" alt="Aruba Central Automation" width="88" height="88">
     <h1>Aruba Central Automation</h1>
     <p>Connect an Aruba Central environment with your own API credentials.</p>
   </header>

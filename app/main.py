@@ -1229,17 +1229,30 @@ async def _classic_central_topology(host: str, token: str, site_id: str) -> Opti
             "unmanaged": bool(_pick(d, "unmanaged", default=False)),
         }
 
+    # drop generic placeholder nodes the topology API injects (internet marker,
+    # station stand-ins) — the diagram synthesises its own Internet + client nodes
+    _TOPO_DROP = {"inet", "internet", "wan", "cloud", "sta", "wifi-sta", "wifi sta",
+                  "wifi_sta", "wired-sta", "wireless-sta", "wifi-client", "wired-client"}
+    dropped = {s for s, n in nodes.items()
+               if str(n.get("name", "")).strip().lower() in _TOPO_DROP}
+    for s in dropped:
+        nodes.pop(s, None)
+
     def _add_edge(lk: dict[str, Any], edge_type_default: str = "") -> None:
         fi = lk.get("fromIf") or lk.get("from_if") or {}
         ti = lk.get("toIf") or lk.get("to_if") or {}
         f = _pick(fi, "serial") or _pick(lk, "source", "from", "sourceSerial")
         t = _pick(ti, "serial") or _pick(lk, "target", "to", "destSerial")
-        if not f or not t:
+        if not f or not t or f in dropped or t in dropped:
             return
         for endp, iff in ((f, fi), (t, ti)):
             if endp not in nodes:
+                nm = _pick(iff, "deviceName", default=str(endp))
+                if str(nm).strip().lower() in _TOPO_DROP:
+                    dropped.add(endp)
+                    return
                 nodes[endp] = {
-                    "serial": endp, "name": _pick(iff, "deviceName", default=str(endp)),
+                    "serial": endp, "name": nm,
                     "type": "other", "model": "", "function": "",
                     "ip": _pick(iff, "ipAddress", default=""), "mac": "",
                     "status": "", "health": "", "unmanaged": True,
