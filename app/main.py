@@ -814,28 +814,28 @@ def _classic_up(v: Any) -> bool:
 
 
 CLASSIC_SOURCES = {
-    "clients": ("/monitoring/v1/clients", "clients"),
     "access-points": ("/monitoring/v2/aps", "aps"),
     "switches": ("/monitoring/v1/switches", "switches"),
     "gateways": ("/monitoring/v1/gateways", "gateways"),
 }
+# Classic v2 clients: one call per client_type; timerange is required.
+CLASSIC_CLIENT_TYPES = (("WIRELESS", False), ("WIRED", True))
+CLASSIC_CLIENT_PARAMS = {"timerange": "3H"}
 
 
-def _classic_norm_client(c: dict[str, Any]) -> dict[str, Any]:
-    conn = str(_pick(c, "connection", "client_type", "connection_type", default="")).upper()
-    wired = "WIRE" in conn and "WIRELESS" not in conn
+def _classic_norm_client(c: dict[str, Any], wired: bool) -> dict[str, Any]:
     band = None if wired else _classic_band(_pick(c, "band", "radio_band", "frequency"))
     return {
         "name": _pick(c, "name", "hostname", "username", "macaddr", default="—"),
         "mac": _pick(c, "macaddr", "mac_address", "mac", default="—"),
         "ip": _pick(c, "ip_address", "ipv4", "ip", default="—"),
-        "vlan": _pick(c, "vlan", "vlan_id", default="—"),
+        "vlan": str(_pick(c, "vlan", "vlan_id", default="—")),
         "band": "Wired" if wired else (band or "—"),
-        "channel": _pick(c, "channel", "wireless_channel", default="—"),
+        "channel": str(_pick(c, "channel", "wireless_channel", default="—")),
         "snr": _pick(c, "snr", "signal_to_noise", default="—"),
         "connType": "Wired" if wired else "Wireless",
         "connectedTo": _pick(c, "associated_device_name", "connected_device_name",
-                             "associated_device_mac", "associated_device", default="—"),
+                             "network", "associated_device", default="—"),
         "os": _pick(c, "os_type", "client_os", "operating_system", default="—"),
         "site": _pick(c, "site", "site_name", default="—"),
         "status": "Connected",
@@ -915,22 +915,30 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "gateways": None, "sites": None, "subscriptions": None,
     }
     probes = {
-        "clients": ("/monitoring/v1/clients", None),
-        "accessPoints": ("/monitoring/v2/aps", None),
-        "switches": ("/monitoring/v1/switches", None),
-        "gateways": ("/monitoring/v1/gateways", None),
-        "sites": ("/central/v2/sites", None),
-        "subscriptions": ("/platform/licensing/v1/subscriptions", None),
+        "accessPoints": "/monitoring/v2/aps",
+        "switches": "/monitoring/v1/switches",
+        "gateways": "/monitoring/v1/gateways",
+        "sites": "/central/v2/sites",
+        "subscriptions": "/platform/licensing/v1/subscriptions",
     }
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            results = await asyncio.gather(*[
+            calls = [
                 _get_total(client, f"https://{host}{p}", headers,
                            {"limit": "1", "calculate_total": "true"})
-                for p, _ in probes.values()
-            ])
+                for p in probes.values()
+            ]
+            calls += [
+                _get_total(client, f"https://{host}/monitoring/v2/clients", headers,
+                           {"limit": "1", "timerange": "3H", "client_type": ct})
+                for ct, _ in CLASSIC_CLIENT_TYPES
+            ]
+            results = await asyncio.gather(*calls)
         for key, val in zip(probes.keys(), results):
             out[key] = val
+        cw, cd = results[-2], results[-1]
+        if cw is not None or cd is not None:
+            out["clients"] = (cw or 0) + (cd or 0)
     except Exception:
         pass
     return out
@@ -940,15 +948,25 @@ async def _classic_central_list(host: str, token: str, entity: str
                                 ) -> tuple[Optional[list[dict[str, Any]]], int]:
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        if entity in CLASSIC_SOURCES:
+        if entity == "clients":
+            rows, seen = [], False
+            for ct, wired in CLASSIC_CLIENT_TYPES:
+                raw, _t, sc = await _fetch_all(
+                    client, f"https://{host}/monitoring/v2/clients", headers, style="offset",
+                    params={"limit": "1000", "timerange": "3H", "client_type": ct}, item_key="clients")
+                if sc == 200 or raw:
+                    seen = True
+                    rows += [_classic_norm_client(x, wired) for x in raw]
+            if not seen:
+                return None, 0
+        elif entity in CLASSIC_SOURCES:
             path, key = CLASSIC_SOURCES[entity]
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}{path}", headers, style="offset",
                 params={"limit": "1000", "calculate_total": "true"}, item_key=key)
             if sc != 200 and not raw:
                 return None, 0
-            norm = _classic_norm_client if entity == "clients" else _classic_norm_device
-            rows = [norm(x) for x in raw]
+            rows = [_classic_norm_device(x) for x in raw]
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -966,7 +984,7 @@ async def _classic_central_list(host: str, token: str, entity: str
             rows = [_classic_norm_sub(x) for x in raw]
         else:
             return None, 0
-    return rows, total if total is not None else len(rows)
+    return rows, len(rows)
 
 
 async def _classic_find(host: str, token: str, entity: str, match) -> Optional[dict[str, Any]]:
@@ -981,12 +999,39 @@ async def _classic_find(host: str, token: str, entity: str, match) -> Optional[d
     return next((x for x in raw if match(x)), None)
 
 
+async def _classic_resolve_site_id(host: str, token: str, name: Any) -> str:
+    if not name:
+        return ""
+    if str(name).isdigit():
+        return str(name)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            rows, _t, _sc = await _fetch_all(
+                client, f"https://{host}/central/v2/sites", headers, style="offset",
+                params={"limit": "1000"}, item_key="sites")
+        for s in rows:
+            if _pick(s, "site_name", "name") == name:
+                return str(_pick(s, "site_id", "id", default=""))
+    except Exception:
+        pass
+    return ""
+
+
 async def _classic_central_client_detail(host: str, token: str, mac: str) -> Optional[dict[str, Any]]:
-    raw = await _classic_find(host, token, "clients",
-                              lambda c: str(_pick(c, "macaddr", "mac_address", "mac", default="")).lower() == mac.lower())
+    raw, wired = None, False
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        for ct, is_wired in CLASSIC_CLIENT_TYPES:
+            rows, _t, _sc = await _fetch_all(
+                client, f"https://{host}/monitoring/v2/clients", headers, style="offset",
+                params={"limit": "1000", "timerange": "3H", "client_type": ct}, item_key="clients")
+            hit = next((c for c in rows if str(_pick(c, "macaddr", "mac_address", default="")).lower() == mac.lower()), None)
+            if hit:
+                raw, wired = hit, is_wired
+                break
     if not raw:
         return None
-    wired = "WIRE" in str(_pick(raw, "connection", "client_type", default="")).upper()
     groups = [
         _kv_group("Identity", raw, [
             ("name", "Name"), ("hostname", "Hostname"), ("macaddr", "MAC address"),
@@ -1011,7 +1056,7 @@ async def _classic_central_client_detail(host: str, token: str, mac: str) -> Opt
         "groups": [g for g in groups if g],
         "meta": {
             "kind": "client",
-            "siteId": str(_pick(raw, "site_id", "site", default="")),
+            "siteId": await _classic_resolve_site_id(host, token, _pick(raw, "site_id", "site")),
             "focusSerial": _pick(raw, "associated_device", "associated_device_mac"),
             "clientName": _pick(raw, "name", "hostname", "macaddr", default="Client"),
             "clientMac": _pick(raw, "macaddr", default=""),
@@ -1054,7 +1099,8 @@ async def _classic_central_device_detail(host: str, token: str, serial: str) -> 
         "subtitle": (_pick(raw, "model", default="") + " · " + _pick(raw, "serial", default="")).strip(" ·"),
         "status": "Up" if up else "Down",
         "groups": [g for g in groups if g],
-        "meta": {"kind": "device", "siteId": str(_pick(raw, "site_id", "site", default="")),
+        "meta": {"kind": "device",
+                 "siteId": await _classic_resolve_site_id(host, token, _pick(raw, "site_id", "site")),
                  "focusSerial": _pick(raw, "serial", "serial_number")},
     }
 
@@ -1099,65 +1145,87 @@ async def _classic_central_site_detail(host: str, token: str, site_id: str) -> O
     }
 
 
+CLASSIC_ROLE_TYPE = {
+    "IAP": "ap", "AP": "ap", "ACCESS POINT": "ap",
+    "SWITCH": "l2switch", "STACK": "l2switch",
+    "CONTROLLER": "gateway", "VPNC": "gateway", "MOBILITY_CONTROLLER": "gateway",
+    "GATEWAY": "gateway", "MCR": "gateway", "SDWAN_GW": "gateway",
+    "SECURITYCLOUD": "internet",
+}
+
+
 async def _classic_central_topology(host: str, token: str, site_id: str) -> Optional[dict[str, Any]]:
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    site_id = await _classic_resolve_site_id(host, token, site_id) or site_id
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-            r = await client.get(
-                f"https://{host}/topology_external/v1/topology/{site_id}", headers=headers)
+            r = await client.get(f"https://{host}/topology_external_api/{site_id}", headers=headers)
         if r.status_code != 200:
             return None
         body = r.json()
     except Exception:
         return None
     root = body.get("result") or body.get("topology") or body
-    raw_nodes = root.get("nodes") or root.get("devices") or []
-    raw_links = root.get("links") or root.get("edges") or []
+    raw_nodes = root.get("devices") or root.get("nodes") or []
+    raw_links = root.get("edges") or root.get("links") or []
+    tunnels = root.get("tunnels") or []
+    roots = [str(x) for x in (root.get("rootNodes") or [])]
 
     nodes: dict[str, dict[str, Any]] = {}
     for d in raw_nodes:
         s = _pick(d, "serial", "serialNumber", "id", "name")
         if not s:
             continue
+        role = str(_pick(d, "role", "deviceRole", "device_type", "type", default="")).upper()
+        st = _pick(d, "status", "state", default="")
         nodes[s] = {
             "serial": s,
             "name": _pick(d, "name", "hostname", default=s),
-            "type": _topo_node_type({
-                "type": _pick(d, "deviceType", "device_type", "type", default=""),
-                "deviceFunction": _pick(d, "role", "deviceRole", default=""),
-                "name": _pick(d, "name", default=""),
-            }),
+            "type": CLASSIC_ROLE_TYPE.get(role, "other"),
             "model": _pick(d, "model", default=""),
             "function": _pick(d, "role", "deviceRole", default=""),
-            "ip": _pick(d, "ip_address", "ipAddress", "ipv4", default=""),
-            "mac": _pick(d, "macaddr", "macRange", "mac", default=""),
-            "status": _pick(d, "status", "state", default=""),
+            "ip": _pick(d, "ipAddress", "ip_address", "ipv4", default=""),
+            "mac": _pick(d, "macaddr", "mac", default=""),
+            "status": "ONLINE" if str(st) in ("1", "up", "Up", "UP", "online") else "OFFLINE",
             "health": _pick(d, "health", default=""),
             "unmanaged": bool(_pick(d, "unmanaged", default=False)),
         }
-    links: list[dict[str, Any]] = []
-    for lk in raw_links:
-        f = _pick(lk, "source", "from", "sourceSerial", "src")
-        t = _pick(lk, "target", "to", "destSerial", "dst")
+
+    def _add_edge(lk: dict[str, Any], edge_type_default: str = "") -> None:
+        fi = lk.get("fromIf") or lk.get("from_if") or {}
+        ti = lk.get("toIf") or lk.get("to_if") or {}
+        f = _pick(fi, "serial") or _pick(lk, "source", "from", "sourceSerial")
+        t = _pick(ti, "serial") or _pick(lk, "target", "to", "destSerial")
         if not f or not t:
-            continue
-        for endp in (f, t):
+            return
+        for endp, iff in ((f, fi), (t, ti)):
             if endp not in nodes:
-                nodes[endp] = {"serial": endp, "name": str(endp), "type": "other",
-                               "model": "", "function": "", "ip": "", "mac": "",
-                               "status": "", "health": "", "unmanaged": True}
+                nodes[endp] = {
+                    "serial": endp, "name": _pick(iff, "deviceName", default=str(endp)),
+                    "type": "other", "model": "", "function": "",
+                    "ip": _pick(iff, "ipAddress", default=""), "mac": "",
+                    "status": "", "health": "", "unmanaged": True,
+                }
         links.append({
             "from": f, "to": t,
             "speed": _fmt_speed(_pick(lk, "speed", "linkSpeed", default=0)),
-            "edgeType": _pick(lk, "type", "edgeType", default=""),
-            "fromPort": _pick(lk, "sourceIfName", "sourcePort", "fromPort", default=""),
-            "toPort": _pick(lk, "destIfName", "destPort", "toPort", default=""),
+            "edgeType": _pick(lk, "edge_type", "type", "edgeType", default=edge_type_default),
+            "fromPort": str(_pick(fi, "name", "portNumber", default="")
+                            or _pick(lk, "sourceIfName", "fromPort", default="")),
+            "toPort": str(_pick(ti, "name", "portNumber", default="")
+                          or _pick(lk, "destIfName", "toPort", default="")),
             "health": _pick(lk, "health", "status", default=""),
         })
+
+    links: list[dict[str, Any]] = []
+    for lk in raw_links:
+        _add_edge(lk)
+    for tn in tunnels:
+        _add_edge(tn, "TUNNEL")
+
     if not nodes:
         return None
-    return {"nodes": list(nodes.values()), "links": links,
-            "isolated": body.get("isolatedDevicesCount", 0)}
+    return {"nodes": list(nodes.values()), "links": links, "isolated": 0, "roots": roots}
 
 
 # --------------------------------------------------------------------------- #

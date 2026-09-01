@@ -1216,7 +1216,8 @@
     nodes.__internet__ = { n: { serial: "__internet__", name: "Internet", type: "internet" }, adj: [] };
     var conn = Object.keys(nodes).filter(function (s) { return nodes[s].adj.length; });
     function pick(t) { return conn.filter(function (s) { return nodes[s].n.type === t; })[0]; }
-    var root = pick("gateway") || pick("l3switch") ||
+    var apiRoot = (data.roots || []).filter(function (s) { return nodes[s] && nodes[s].adj.length; })[0];
+    var root = apiRoot || pick("gateway") || pick("l3switch") ||
       conn.sort(function (a, b) { return nodes[b].adj.length - nodes[a].adj.length; })[0];
     if (root) { nodes.__internet__.adj.push(root); nodes[root].adj.push("__internet__"); }
     links.push({ from: "__internet__", to: root, synthetic: true });

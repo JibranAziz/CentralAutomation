@@ -108,16 +108,25 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 - The **full dashboard** (overview / lists / detail / topology) is wired to these
   legacy monitoring endpoints, mapped by `_classic_*` in `main.py` to the same
   normalized shapes as New Central:
-  - counts: `?limit=1&calculate_total=true` → `total` on `/monitoring/v1/clients`,
+  - device/site/subscription counts: `?limit=1&calculate_total=true` → `total` on
     `/monitoring/v2/aps`, `/monitoring/v1/switches`, `/monitoring/v1/gateways`,
     `/central/v2/sites`, `/platform/licensing/v1/subscriptions`
-  - lists: same paths, `offset`/`limit` paging, list key per entity
-    (`aps`/`switches`/`gateways`/`clients`/`sites`/`subscriptions`)
+  - **clients**: `/monitoring/v2/clients` — `timerange` (req, `3H`) + `client_type`
+    (`WIRELESS`/`WIRED`); TWO calls per view, merged; wired/wireless comes from
+    which call, not a field. `band` is like `"5 Ghz"`.
+  - lists: device paths use `offset`/`limit`, list key per entity
+    (`aps`/`switches`/`gateways`); clients as above; `sites`/`subscriptions` too
   - site health merged from `/branchhealth/v1/site`
-  - topology: `/topology_external/v1/topology/{site-id}` (nodes/edges → normalized)
+  - **topology**: `GET /topology_external_api/{site_id}` (int site id) →
+    `{devices, edges (fromIf/toIf), tunnels, rootNodes}`; `role` ∈
+    IAP/Switch/Controller/VPNC/SECURITYCLOUD. `rootNodes` is passed to the client
+    as `roots` and the diagram uses it as the layout root.
+  - Classic device/client items carry a site *name*, not id — `_classic_resolve_site_id`
+    looks the numeric id up from `/central/v2/sites` for topology.
   - client/device/site detail: found by scanning the list responses
-- Field names are **guessed** (`_pick()` tries several spellings). This whole
-  Classic path needs one live debugging pass once a Classic token exists.
+- Confirmed live 2026-09-01: overview (APs/switches/gateways/sites/subscriptions),
+  device detail. Clients + topology reworked per the API docs but **not re-verified
+  live yet**. Other field names still `_pick()`-guessed.
 
 ### Dashboard wiring (frontend)
 
