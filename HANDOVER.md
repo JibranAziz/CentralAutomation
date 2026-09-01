@@ -103,10 +103,29 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 
 - Token: `POST https://{baseUrl}/oauth2/token` with **query params**
   `client_id, client_secret, grant_type=refresh_token, refresh_token`.
-- Device tallies (best-effort): `/monitoring/v2/aps`, `/monitoring/v1/switches`,
-  `/monitoring/v1/gateways`.
 - Base-URL dropdown values are region API-gateway hostnames (`internal-apigw…`,
   `app1-apigw…`, `apigw-prod2…`, `eu-apigw…`, …).
+- The **full dashboard** (overview / lists / detail / topology) is wired to these
+  legacy monitoring endpoints, mapped by `_classic_*` in `main.py` to the same
+  normalized shapes as New Central:
+  - counts: `?limit=1&calculate_total=true` → `total` on `/monitoring/v1/clients`,
+    `/monitoring/v2/aps`, `/monitoring/v1/switches`, `/monitoring/v1/gateways`,
+    `/central/v2/sites`, `/platform/licensing/v1/subscriptions`
+  - lists: same paths, `offset`/`limit` paging, list key per entity
+    (`aps`/`switches`/`gateways`/`clients`/`sites`/`subscriptions`)
+  - site health merged from `/branchhealth/v1/site`
+  - topology: `/topology_external/v1/topology/{site-id}` (nodes/edges → normalized)
+  - client/device/site detail: found by scanning the list responses
+- Field names are **guessed** (`_pick()` tries several spellings). This whole
+  Classic path needs one live debugging pass once a Classic token exists.
+
+### Dashboard wiring (frontend)
+
+One shared dashboard widget (`#dashboard`) is physically relocated into whichever
+of the two dashboard tab panels is active; `activeFlavor` (`"new"` / `"classic"`)
+is prepended to every `/api/{overview,list,detail,topology}/{flavor}/…` call and
+to the per-flavor `overviewLoaded` flag. Nothing else in the drill-down / detail
+/ topology code is flavor-specific.
 
 ### New Central — verified against a live tenant
 
@@ -159,8 +178,8 @@ the connecting link carries a label with band + SNR.
 
 ## Known gaps / TODO
 
-- Classic Central: dashboard blocks not built; connect flow untested against real
-  creds.
+- Classic Central: full dashboard is built but the whole upstream path (connect
+  + every monitoring API + field names) is untested against a real Classic token.
 - New Central token lifetime is ~2 h; `/api/refresh` and `/api/list` return 401
   once it expires and the user must reconnect. No server-side token refresh.
 - `LIST_CAP = 6000` rows per entity.

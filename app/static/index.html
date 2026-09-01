@@ -667,10 +667,6 @@
       <p>Connect Classic Central from the <strong>Connect Central</strong> tab to see its dashboard.</p>
       <button class="btn" type="button" data-goto="tab-connect">Go to Connect Central</button>
     </div>
-    <div id="classic-dash" hidden>
-      <div class="panel-head">Account Overview</div>
-      <p class="foot" style="text-align:left;margin-top:0">Classic Central blocks coming next.</p>
-    </div>
   </section>
 
   <!-- ================= NEW CENTRAL DASHBOARD ================= -->
@@ -679,10 +675,12 @@
       <p>Connect New Central from the <strong>Connect Central</strong> tab to see your account overview.</p>
       <button class="btn" type="button" data-goto="tab-connect">Go to Connect Central</button>
     </div>
-    <div id="new-dash" hidden>
-      <div id="new-overview">
+
+    <!-- shared dashboard — JS relocates this into whichever dashboard tab is active -->
+    <div id="dashboard" hidden>
+      <div id="dash-overview">
         <div class="panel-head">Account Overview</div>
-        <div class="statgrid" id="new-statgrid">
+        <div class="statgrid" id="dash-statgrid">
           <button class="statcard" type="button" data-entity="clients" style="--c:#3b82f6">
             <div class="stat-top">
               <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.4" stroke="currentColor" stroke-width="1.4"/><path d="M1.8 13c0-2.3 1.9-4 4.2-4s4.2 1.7 4.2 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11 4.2A2.2 2.2 0 0 1 11 8.4M11.5 13c0-1.7-.7-3.1-1.8-3.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
@@ -733,12 +731,12 @@
           </button>
         </div>
         <div class="dash-actions">
-          <span class="upd" id="new-updated"></span>
-          <button class="linkbtn" type="button" id="new-dash-refresh">Refresh</button>
+          <span class="upd" id="dash-updated"></span>
+          <button class="linkbtn" type="button" id="dash-refresh">Refresh</button>
         </div>
       </div>
 
-      <div id="new-detail" hidden>
+      <div id="dash-detail" hidden>
         <div class="detail-bar">
           <button class="linkbtn" type="button" id="detail-back">← Account Overview</button>
           <span class="panel-head" id="detail-title">Clients</span>
@@ -854,7 +852,11 @@
       t.tabIndex = on ? 0 : -1;
       document.getElementById(PANEL_IDS[t.id]).hidden = !on;
     });
-    if (tab.id === "tab-newcentral") loadNewOverview(false);
+    if (tab.id === "tab-newcentral" || tab.id === "tab-classic") {
+      mountDashboard(tab.id === "tab-classic" ? "classic" : "new");
+      updateDashboards();
+      loadOverview(false);
+    }
   }
   tabs.forEach(function (t, i) {
     t.addEventListener("click", function () { selectTab(t); });
@@ -900,51 +902,61 @@
     });
   }
 
-  /* ---- Dashboards ---- */
+  /* ---- Dashboards (shared UI, one active flavor at a time) ---- */
   var connState = { classic: false, new: false };
-  var newOverviewLoaded = false;
+  var overviewLoaded = { classic: false, new: false };
+  var activeFlavor = "new";
+  var dashEl = document.getElementById("dashboard");
+
+  function mountDashboard(flavor) {
+    activeFlavor = flavor;
+    var panel = document.getElementById(flavor === "classic" ? "panel-classic" : "panel-newcentral");
+    if (dashEl.parentNode !== panel) panel.appendChild(dashEl);
+  }
 
   function updateDashboards() {
     document.getElementById("classic-prompt").hidden = connState.classic;
-    document.getElementById("classic-dash").hidden = !connState.classic;
     document.getElementById("new-prompt").hidden = connState.new;
-    document.getElementById("new-dash").hidden = !connState.new;
-    if (!connState.new) {
-      newOverviewLoaded = false;
+    var live = connState[activeFlavor];
+    dashEl.hidden = !live;
+    if (!live) {
+      overviewLoaded[activeFlavor] = false;
       closeDetail();
-      document.querySelectorAll('#new-statgrid [data-stat]').forEach(function (el) {
+      document.querySelectorAll('#dash-statgrid [data-stat]').forEach(function (el) {
         el.textContent = "—"; el.classList.add("dim");
       });
-      document.getElementById("new-updated").textContent = "";
+      document.getElementById("dash-updated").textContent = "";
     }
   }
 
   function fmt(n) { return (n == null) ? "—" : String(n); }
 
-  function loadNewOverview(force) {
-    if (!connState.new) return;
-    if (newOverviewLoaded && !force) return;
-    newOverviewLoaded = true;
-    var btn = document.getElementById("new-dash-refresh");
+  function loadOverview(force) {
+    var flavor = activeFlavor;
+    if (!connState[flavor]) return;
+    if (overviewLoaded[flavor] && !force) return;
+    overviewLoaded[flavor] = true;
+    var btn = document.getElementById("dash-refresh");
     btn.disabled = true; btn.textContent = "Loading…";
-    api("/api/overview/new").then(function (res) {
-      if (!res.ok) { newOverviewLoaded = false; return; }
+    api("/api/overview/" + flavor).then(function (res) {
+      if (activeFlavor !== flavor) return;
+      if (!res.ok) { overviewLoaded[flavor] = false; return; }
       var o = res.body.overview || {};
-      document.querySelectorAll('#new-statgrid [data-stat]').forEach(function (el) {
+      document.querySelectorAll('#dash-statgrid [data-stat]').forEach(function (el) {
         var v = o[el.getAttribute("data-stat")];
         el.textContent = fmt(v);
         el.classList.toggle("dim", v == null);
       });
       var d = new Date();
-      document.getElementById("new-updated").textContent =
+      document.getElementById("dash-updated").textContent =
         "Updated " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     }).finally(function () { btn.disabled = false; btn.textContent = "Refresh"; });
   }
-  document.getElementById("new-dash-refresh").addEventListener("click", function () {
-    loadNewOverview(true);
+  document.getElementById("dash-refresh").addEventListener("click", function () {
+    loadOverview(true);
   });
 
-  /* ---- New Central drill-down ---- */
+  /* ---- drill-down ---- */
   var DEV_COLS = [["name", "Name"], ["status", "Status"], ["ip", "IPv4"], ["model", "Model"],
     ["serial", "Serial"], ["mac", "MAC"], ["clients", "Clients"], ["firmware", "Firmware"], ["site", "Site"]];
   var DETAIL = {
@@ -964,8 +976,8 @@
   };
   var MONO_KEYS = { mac: 1, serial: 1, ip: 1, sku: 1 };
 
-  var detailEl = document.getElementById("new-detail");
-  var overviewEl = document.getElementById("new-overview");
+  var detailEl = document.getElementById("dash-detail");
+  var overviewEl = document.getElementById("dash-overview");
   var listEl = document.getElementById("detail-list");
   var entityEl = document.getElementById("detail-entity");
   var searchEl = document.getElementById("detail-search");
@@ -1105,7 +1117,7 @@
   function fetchDetail(entity) {
     var rb = document.getElementById("detail-refresh");
     rb.disabled = true;
-    api("/api/list/new/" + entity).then(function (res) {
+    api("/api/list/" + activeFlavor + "/" + entity).then(function (res) {
       if (dState.entity !== entity) return;
       if (!res.ok) { countEl.textContent = (res.body && res.body.error) || "Could not load data."; return; }
       dState.rows = res.body.rows || [];
@@ -1121,7 +1133,7 @@
     document.getElementById("entity-sub").textContent = "";
     var groupsEl = document.getElementById("entity-groups");
     groupsEl.innerHTML = '<p class="detail-count">Loading…</p>';
-    api("/api/detail/new/" + kind + "/" + encodeURIComponent(ident)).then(function (res) {
+    api("/api/detail/" + activeFlavor + "/" + kind + "/" + encodeURIComponent(ident)).then(function (res) {
       if (!res.ok) {
         groupsEl.innerHTML = "";
         var p = document.createElement("p");
@@ -1186,7 +1198,7 @@
     wrap.innerHTML = "";
     legend.innerHTML = "";
     note.textContent = "Loading…";
-    api("/api/topology/new/" + encodeURIComponent(meta.siteId)).then(function (res) {
+    api("/api/topology/" + activeFlavor + "/" + encodeURIComponent(meta.siteId)).then(function (res) {
       if (!res.ok || !res.body.nodes) {
         note.textContent = (res.body && res.body.error) || "Topology unavailable for this site.";
         return;
@@ -1386,7 +1398,7 @@
     dState.entity = null;
   }
 
-  document.getElementById("new-statgrid").addEventListener("click", function (e) {
+  document.getElementById("dash-statgrid").addEventListener("click", function (e) {
     var card = e.target.closest("[data-entity]");
     if (card) openDetail(card.getAttribute("data-entity"));
   });
