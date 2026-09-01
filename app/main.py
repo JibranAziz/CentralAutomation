@@ -611,6 +611,7 @@ def _client_detail(c: dict[str, Any]) -> dict[str, Any]:
             "focusSerial": c.get("connectedDeviceSerial"),
             "clientName": name,
             "clientMac": c.get("macAddress"),
+            "clientIp": c.get("ipv4") or c.get("ipv6"),
             "connType": c.get("clientConnectionType"),
             "band": c.get("wirelessBand"),
             "snr": c.get("snr"),
