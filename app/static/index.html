@@ -360,6 +360,16 @@
   }
   .pill.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
   .pill.bad { background: color-mix(in srgb, var(--down) 16%, transparent); color: var(--down); }
+  .hcell {
+    display: flex; gap: 11px; white-space: nowrap;
+    font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .hcell > span { display: flex; align-items: center; gap: 4px; }
+  .hcell b { font-weight: 600; color: var(--ink); }
+  .hcell .p { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .hcell .poor { background: var(--down); }
+  .hcell .fair { background: #d99a2b; }
+  .hcell .good { background: var(--ok); }
   .empty { padding: 28px 12px; text-align: center; color: var(--faint); font-size: 12.5px; }
   table.dtable tr.clickable { cursor: pointer; }
   table.dtable tr.clickable td:first-child { color: var(--accent); font-weight: 500; }
@@ -886,8 +896,9 @@
     "access-points": { title: "Access Points", drill: "device", idKey: "serial", cols: DEV_COLS },
     switches: { title: "Switches", drill: "device", idKey: "serial", cols: DEV_COLS },
     gateways: { title: "Gateways", drill: "device", idKey: "serial", cols: DEV_COLS },
-    sites: { title: "Sites", cols: [
-      ["name", "Site"], ["city", "City"], ["country", "Country"], ["clients", "Clients"], ["alerts", "Alerts"]] },
+    sites: { title: "Sites", drill: "site", idKey: "id", cols: [
+      ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
+      ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },
     subscriptions: { title: "Subscriptions", cols: [
       ["description", "Subscription"], ["sku", "SKU"], ["tier", "Tier"], ["quantity", "Qty"],
       ["available", "Available"], ["status", "Status"], ["end", "Expires"], ["eval", "Kind"]] }
@@ -910,6 +921,19 @@
     s.className = "pill " + (ok ? "ok" : "bad");
     s.textContent = val;
     return s;
+  }
+
+  function healthCell(h) {
+    h = h || { poor: 0, fair: 0, good: 0 };
+    var wrap = document.createElement("span");
+    wrap.className = "hcell";
+    [["poor", h.poor], ["fair", h.fair], ["good", h.good]].forEach(function (x) {
+      var s = document.createElement("span");
+      var p = document.createElement("span"); p.className = "p " + x[0];
+      var b = document.createElement("b"); b.textContent = x[1] == null ? 0 : x[1];
+      s.appendChild(p); s.appendChild(b); wrap.appendChild(s);
+    });
+    return wrap;
   }
 
   function visibleRows() {
@@ -959,6 +983,7 @@
           var td = tr.insertCell();
           var v = r[c[0]];
           if (c[0] === "status") { td.appendChild(pill(v)); return; }
+          if (c[0] === "clientHealth" || c[0] === "deviceHealth") { td.appendChild(healthCell(v)); return; }
           td.textContent = (v == null || v === "") ? "—" : String(v);
           if (MONO_KEYS[c[0]]) td.className = "mono";
         });
@@ -972,8 +997,14 @@
     countEl.textContent = "Showing " + rows.length + " of " + dState.rows.length;
   }
 
+  function csvVal(v) {
+    if (v && typeof v === "object" && "good" in v) {
+      return v.good + " good / " + v.fair + " fair / " + v.poor + " poor";
+    }
+    return (v == null || v === "—") ? "" : String(v);
+  }
   function csvEscape(v) {
-    var s = (v == null || v === "—") ? "" : String(v);
+    var s = String(v == null ? "" : v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
   function downloadCsv() {
@@ -981,7 +1012,7 @@
     var rows = visibleRows();
     var lines = [def.cols.map(function (c) { return csvEscape(c[1]); }).join(",")];
     rows.forEach(function (r) {
-      lines.push(def.cols.map(function (c) { return csvEscape(r[c[0]]); }).join(","));
+      lines.push(def.cols.map(function (c) { return csvEscape(csvVal(r[c[0]])); }).join(","));
     });
     // UTF-8 BOM so Excel reads accents / dashes correctly
     var blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });

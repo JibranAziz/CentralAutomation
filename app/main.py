@@ -352,15 +352,80 @@ def _norm_device(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _health_triplet(obj: Optional[dict[str, Any]]) -> dict[str, int]:
+    groups = ((obj or {}).get("health") or {}).get("groups") or []
+    g = {x.get("name"): x.get("value", 0) for x in groups}
+    return {"poor": g.get("Poor", 0), "fair": g.get("Fair", 0), "good": g.get("Good", 0)}
+
+
 def _norm_site(s: dict[str, Any]) -> dict[str, Any]:
     addr = s.get("address") or {}
     return {
         "name": s.get("siteName") or "—",
+        "id": s.get("id") or "",
+        "clients": (s.get("clients") or {}).get("count", 0),
+        "clientHealth": _health_triplet(s.get("clients")),
+        "devices": (s.get("devices") or {}).get("count", 0),
+        "deviceHealth": _health_triplet(s.get("devices")),
+        "alerts": (s.get("alerts") or {}).get("totalCount", 0),
         "city": addr.get("city") or "—",
         "country": addr.get("country") or "—",
-        "clients": (s.get("clients") or {}).get("count", 0),
-        "alerts": (s.get("alerts") or {}).get("totalCount", 0),
     }
+
+
+def _site_detail(s: dict[str, Any]) -> dict[str, Any]:
+    addr = s.get("address") or {}
+    loc = s.get("location") or {}
+    ch, dh, sh = _health_triplet(s.get("clients")), _health_triplet(s.get("devices")), _health_triplet(s)
+    reasons = "; ".join(
+        f"{r.get('reason')}" + (f" ({(r.get('data') or {}).get('count')})" if (r.get('data') or {}).get('count') is not None else "")
+        for r in (s.get("reasons") or [])
+    )
+    src = {
+        "health": f"{sh['good']}% good" if any(sh.values()) else "—",
+        "clientCount": (s.get("clients") or {}).get("count", 0),
+        "deviceCount": (s.get("devices") or {}).get("count", 0),
+        "alertCount": (s.get("alerts") or {}).get("totalCount", 0),
+        "reasons": reasons,
+        "cGood": ch["good"], "cFair": ch["fair"], "cPoor": ch["poor"],
+        "dGood": dh["good"], "dFair": dh["fair"], "dPoor": dh["poor"],
+        "address": addr.get("address"), "city": addr.get("city"), "state": addr.get("state"),
+        "zip": addr.get("zipCode"), "country": addr.get("country"),
+        "lat": loc.get("latitude"), "long": loc.get("longitude"),
+        "id": s.get("id"),
+    }
+    groups = [
+        _kv_group("Overview", src, [
+            ("health", "Site health"), ("clientCount", "Clients"), ("deviceCount", "Devices"),
+            ("alertCount", "Open alerts"), ("reasons", "Health reasons"), ("id", "Site ID"),
+        ]),
+        _kv_group("Client health", src, [("cGood", "Good"), ("cFair", "Fair"), ("cPoor", "Poor")]),
+        _kv_group("Device health", src, [("dGood", "Good"), ("dFair", "Fair"), ("dPoor", "Poor")]),
+        _kv_group("Address", src, [
+            ("address", "Street"), ("city", "City"), ("state", "State"),
+            ("zip", "Postcode"), ("country", "Country"),
+        ]),
+        _kv_group("Location", src, [("lat", "Latitude"), ("long", "Longitude")]),
+    ]
+    return {
+        "title": s.get("siteName") or "Site",
+        "subtitle": ", ".join(p for p in (addr.get("city"), addr.get("country")) if p),
+        "status": "",
+        "groups": [g for g in groups if g],
+    }
+
+
+async def _new_central_site_detail(host: str, token: str, site_id: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            raw, _t, _sc = await _fetch_all(
+                client, f"https://{host}/network-monitoring/v1/sites-health", headers,
+                style="offset", params={"limit": "100"})
+            match = next((x for x in raw if str(x.get("id", "")) == str(site_id)), None)
+            return _site_detail(match) if match else None
+    except Exception:
+        return None
 
 
 def _norm_sub(s: dict[str, Any]) -> dict[str, Any]:
@@ -723,7 +788,7 @@ async def list_new(entity: str, request: Request) -> JSONResponse:
 
 @app.get("/api/detail/new/{kind}/{ident}")
 async def detail_new(kind: str, ident: str, request: Request) -> JSONResponse:
-    if kind not in ("client", "device"):
+    if kind not in ("client", "device", "site"):
         return _err(404, "Unknown detail type.")
     sess = _get(request)
     conn = sess.get("new") if sess else None
@@ -733,6 +798,8 @@ async def detail_new(kind: str, ident: str, request: Request) -> JSONResponse:
         return _err(401, "The access token has expired — reconnect New Central.")
     if kind == "client":
         data = await _new_central_client_detail(conn["host"], conn["access_token"], ident)
+    elif kind == "site":
+        data = await _new_central_site_detail(conn["host"], conn["access_token"], ident)
     else:
         data = await _new_central_device_detail(conn["host"], conn["access_token"], ident)
     if data is None:
