@@ -610,6 +610,8 @@ def _client_detail(c: dict[str, Any]) -> dict[str, Any]:
             "clientMac": c.get("macAddress"),
             "connType": c.get("clientConnectionType"),
             "band": c.get("wirelessBand"),
+            "snr": c.get("snr"),
+            "channel": c.get("wirelessChannel"),
         },
     }
 

@@ -148,7 +148,9 @@ root, and draws an inline SVG: rounded node cards with per-type icons and
 health-coloured borders, curved links, an animated dashed "active path" from the
 focus node up to the Internet, hover tooltips (speed + ports), and clickable
 managed nodes that open that device's detail. Isolated devices (no LLDP links)
-are counted in the caption, not drawn.
+are counted in the caption, not drawn. The client node is forced onto its own
+bottom layer (max depth + 1), aligned under its parent AP; for a wireless client
+the connecting link carries a label with band + SNR.
 - Per-device client counts are joined client→device via `connectedDeviceSerial`.
 - Sites: `GET /network-monitoring/v1/sites-health` (offset/limit) → `total`.
 - Subscriptions: `GET https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions`

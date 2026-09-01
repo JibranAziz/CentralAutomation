@@ -416,6 +416,8 @@
   .topo-node.unmanaged text.sub { fill: var(--faint); font-style: italic; }
   .topo-node.unmanaged.link:hover rect.card { stroke: var(--muted); stroke-dasharray: 4 3; }
   .topo-legend .sw.dashed { background-image: none !important; border: 1px dashed var(--faint); height: 0; }
+  .topo-linklabel rect { fill: var(--surface); stroke: var(--accent-line); stroke-width: 1; }
+  .topo-linklabel text { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
   .topo-node text.nm { fill: var(--ink); font-size: 11px; font-weight: 600; }
   .topo-node text.sub { fill: var(--muted); font-size: 9.5px; font-family: var(--mono); }
   .topo-node text.dot { font-size: 13px; }
@@ -1215,13 +1217,19 @@
     }
 
     if (meta.kind === "client" && meta.focusSerial && nodes[meta.focusSerial]) {
-      var dd = depth[meta.focusSerial];
+      var maxD = 0;
+      Object.keys(depth).forEach(function (k) { maxD = Math.max(maxD, depth[k]); });
       nodes.__client__ = { n: { serial: "__client__", name: meta.clientName || "This client",
         type: meta.connType === "Wired" ? "clientWired" : "clientWireless" }, adj: [meta.focusSerial] };
-      depth.__client__ = (dd === undefined ? 1 : dd + 1);
+      depth.__client__ = (depth[meta.focusSerial] === undefined ? 1 : maxD + 1);
       parent.__client__ = meta.focusSerial;
       order.push("__client__");
-      links.push({ from: meta.focusSerial, to: "__client__", speed: meta.band || "", synthetic: true });
+      var lbl = "";
+      if (meta.connType !== "Wired") {
+        lbl = [meta.band, meta.snr != null && meta.snr !== "" ? "SNR " + meta.snr + " dB" : ""]
+          .filter(Boolean).join("   ·   ");
+      }
+      links.push({ from: meta.focusSerial, to: "__client__", label: lbl, synthetic: true });
     }
 
     var focus = meta.kind === "client" ? "__client__" : meta.focusSerial;
@@ -1266,6 +1274,12 @@
       arr.forEach(function (s) { pos[s] = { x: cursor + nw[s] / 2, y: y, w: nw[s] }; cursor += nw[s] + GAP; });
     });
 
+    // keep the client node directly under the AP/switch it connects to
+    if (pos.__client__ && pos[parent.__client__]) {
+      pos.__client__.x = pos[parent.__client__].x;
+      width = Math.max(width, pos.__client__.x + pos.__client__.w / 2 + 24);
+    }
+
     var svg = el("svg", { viewBox: "0 0 " + width + " " + height, width: width, "font-family": "inherit" });
 
     Object.keys(layers).forEach(function (k) {
@@ -1273,6 +1287,7 @@
       svg.appendChild(el("text", { x: 12, y: PADY + k * ROWH + NH / 2 + 3, class: "topo-layer-label" })).textContent = name;
     });
 
+    var pendingLabels = [];
     links.forEach(function (l) {
       var a = pos[l.from], b = pos[l.to];
       if (!a || !b) return;
@@ -1286,6 +1301,7 @@
         .filter(Boolean).join("  ·  ");
       if (tip) { var t = el("title", {}); t.textContent = tip; p.appendChild(t); }
       svg.appendChild(p);
+      if (l.label) pendingLabels.push({ label: l.label, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
     });
 
     order.forEach(function (s) {
@@ -1322,6 +1338,17 @@
       tt.textContent = nd.name + (nd.ip ? " · " + nd.ip : "") + (unmanaged ? " · not managed by Central" : "");
       g.appendChild(tt);
       svg.appendChild(g);
+    });
+
+    // link labels (band / SNR on the client link) — drawn above nodes
+    pendingLabels.forEach(function (pl) {
+      var w2 = pl.label.length * 5.6 + 16;
+      var lg = el("g", { class: "topo-linklabel", transform: "translate(" + pl.x + " " + pl.y + ")" });
+      lg.appendChild(el("rect", { x: -w2 / 2, y: -10, width: w2, height: 20, rx: 10 }));
+      var tx = el("text", { x: 0, y: 4, "text-anchor": "middle" });
+      tx.textContent = pl.label;
+      lg.appendChild(tx);
+      svg.appendChild(lg);
     });
 
     wrap.innerHTML = "";
