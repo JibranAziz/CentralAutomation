@@ -1226,8 +1226,8 @@
       order.push("__client__");
       var lbl = "";
       if (meta.connType !== "Wired") {
-        lbl = [meta.band, meta.snr != null && meta.snr !== "" ? "SNR " + meta.snr + " dB" : ""]
-          .filter(Boolean).join("   ·   ");
+        var hasSnr = meta.snr != null && meta.snr !== "" && Number(meta.snr) > 0;
+        lbl = [meta.band, hasSnr ? "SNR " + meta.snr + " dB" : ""].filter(Boolean).join("   ·   ");
       }
       links.push({ from: meta.focusSerial, to: "__client__", label: lbl, synthetic: true });
     }
