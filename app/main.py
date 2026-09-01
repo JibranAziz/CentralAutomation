@@ -978,22 +978,52 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     return out
 
 
+def _group_names_from(items: Any) -> list[str]:
+    out: list[str] = []
+    for it in items or []:
+        if isinstance(it, list) and it:
+            out.append(str(it[0]))
+        elif isinstance(it, dict):
+            out.append(str(_pick(it, "group", "group_name", "name", default="")))
+        elif isinstance(it, str):
+            out.append(it)
+    return [n for n in out if n]
+
+
 async def _classic_group_names(client: httpx.AsyncClient, host: str,
                                headers: dict[str, str]) -> tuple[Optional[list[str]], int]:
-    raw, _t, sc = await _fetch_all(
-        client, f"https://{host}/configuration/v2/groups", headers,
-        style="offset", params={"limit": "1000"}, item_key="data")
-    if sc != 200 and not raw:
-        return None, sc
-    names: list[str] = []
-    for it in raw:
-        if isinstance(it, list) and it:
-            names.append(str(it[0]))
-        elif isinstance(it, dict):
-            names.append(str(_pick(it, "group", "group_name", "name", default="")))
-        elif isinstance(it, str):
-            names.append(it)
-    return [n for n in names if n], 200
+    # Classic config endpoints cap `limit` at 20.
+    last_sc = 0
+    for path in ("/configuration/v2/groups", "/configuration/v1/groups"):
+        try:
+            r = await client.get(f"https://{host}{path}", headers=headers,
+                                 params={"limit": 20, "offset": 0})
+        except Exception:
+            continue
+        last_sc = r.status_code
+        if r.status_code != 200:
+            continue
+        body = r.json() if r.content else {}
+        items = body.get("data") or body.get("groups") or body.get("items") or []
+        names = _group_names_from(items)
+        total = int(body.get("total") or 0)
+        offset = 20
+        while len(names) < total and offset < 4000:
+            try:
+                r2 = await client.get(f"https://{host}{path}", headers=headers,
+                                      params={"limit": 20, "offset": offset})
+            except Exception:
+                break
+            if r2.status_code != 200:
+                break
+            b2 = r2.json() if r2.content else {}
+            more = _group_names_from(b2.get("data") or b2.get("groups") or [])
+            if not more:
+                break
+            names += more
+            offset += 20
+        return names, 200
+    return None, last_sc
 
 
 async def _classic_group_device_counts(client: httpx.AsyncClient, host: str,
@@ -1050,17 +1080,17 @@ async def _classic_central_list(host: str, token: str, entity: str
                     row["clients"] = counts.get(row["serial"])
                 rows.append(row)
         elif entity == "ap-groups":
-            names, sc = await _classic_group_names(client, host, headers)
+            names, _sc = await _classic_group_names(client, host, headers)
             dc = await _classic_group_device_counts(client, host, headers)
-            all_names = set(names or []) | set(dc.keys())
-            if not all_names and sc != 200:
-                return None, 0
+            if names is None:                       # config API unavailable — derive from devices
+                names = sorted(dc.keys(), key=str.lower)
+                if not names:
+                    return None, 0
             rows = []
-            for n in sorted(all_names, key=str.lower):
+            for n in names:
                 c = dc.get(n, {"aps": 0, "switches": 0, "gateways": 0})
                 rows.append({"name": n, "aps": c["aps"], "switches": c["switches"],
-                             "gateways": c["gateways"],
-                             "configured": "Yes" if names and n in names else "—"})
+                             "gateways": c["gateways"]})
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
