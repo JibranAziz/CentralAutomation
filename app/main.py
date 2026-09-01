@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+from urllib.parse import quote
 import secrets
 import threading
 import time
@@ -249,7 +250,7 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
-        "gateways": None, "sites": None, "subscriptions": None,
+        "gateways": None, "sites": None, "subscriptions": None, "apGroups": None,
     }
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -931,7 +932,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
-        "gateways": None, "sites": None, "subscriptions": None,
+        "gateways": None, "sites": None, "subscriptions": None, "apGroups": None,
     }
     probes = {
         "accessPoints": "/monitoring/v2/aps",
@@ -940,6 +941,13 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "sites": "/central/v2/sites",
         "subscriptions": "/platform/licensing/v1/subscriptions",
     }
+
+    async def _count_groups(client):
+        try:
+            names, _sc = await _classic_group_names(client, host, headers)
+            return len(names) if names is not None else None
+        except Exception:
+            return None
     async def _count_rows(client, path):
         try:
             rows, _t, sc = await _fetch_all(
@@ -957,15 +965,51 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
                 for p in probes.values()
             ]
             calls += [_count_rows(client, p) for p, _ in CLASSIC_CLIENT_SOURCES]
+            calls.append(_count_groups(client))
             results = await asyncio.gather(*calls)
         for key, val in zip(probes.keys(), results):
             out[key] = val
-        cw, cd = results[-2], results[-1]
+        cw, cd = results[-3], results[-2]
         if cw is not None or cd is not None:
             out["clients"] = (cw or 0) + (cd or 0)
+        out["apGroups"] = results[-1]
     except Exception:
         pass
     return out
+
+
+async def _classic_group_names(client: httpx.AsyncClient, host: str,
+                               headers: dict[str, str]) -> tuple[Optional[list[str]], int]:
+    raw, _t, sc = await _fetch_all(
+        client, f"https://{host}/configuration/v2/groups", headers,
+        style="offset", params={"limit": "1000"}, item_key="data")
+    if sc != 200 and not raw:
+        return None, sc
+    names: list[str] = []
+    for it in raw:
+        if isinstance(it, list) and it:
+            names.append(str(it[0]))
+        elif isinstance(it, dict):
+            names.append(str(_pick(it, "group", "group_name", "name", default="")))
+        elif isinstance(it, str):
+            names.append(it)
+    return [n for n in names if n], 200
+
+
+async def _classic_group_device_counts(client: httpx.AsyncClient, host: str,
+                                       headers: dict[str, str]) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for cat, path, key in (("aps", "/monitoring/v2/aps", "aps"),
+                           ("switches", "/monitoring/v1/switches", "switches"),
+                           ("gateways", "/monitoring/v1/gateways", "gateways")):
+        raw, _t, _sc = await _fetch_all(
+            client, f"https://{host}{path}", headers, style="offset",
+            params={"limit": "1000"}, item_key=key)
+        for d in raw:
+            g = _pick(d, "group_name", "group")
+            if g:
+                counts.setdefault(g, {"aps": 0, "switches": 0, "gateways": 0})[cat] += 1
+    return counts
 
 
 async def _classic_central_list(host: str, token: str, entity: str
@@ -1005,6 +1049,18 @@ async def _classic_central_list(host: str, token: str, entity: str
                 if row["clients"] is None:
                     row["clients"] = counts.get(row["serial"])
                 rows.append(row)
+        elif entity == "ap-groups":
+            names, sc = await _classic_group_names(client, host, headers)
+            dc = await _classic_group_device_counts(client, host, headers)
+            all_names = set(names or []) | set(dc.keys())
+            if not all_names and sc != 200:
+                return None, 0
+            rows = []
+            for n in sorted(all_names, key=str.lower):
+                c = dc.get(n, {"aps": 0, "switches": 0, "gateways": 0})
+                rows.append({"name": n, "aps": c["aps"], "switches": c["switches"],
+                             "gateways": c["gateways"],
+                             "configured": "Yes" if names and n in names else "—"})
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -1180,6 +1236,64 @@ async def _classic_central_site_detail(host: str, token: str, site_id: str) -> O
         "status": "",
         "groups": [g for g in groups if g],
         "meta": {"kind": "site", "siteId": row["id"] or row["name"]},
+    }
+
+
+async def _classic_central_group_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    props: dict[str, Any] = {}
+    devices: list[str] = []
+    counts = {"aps": 0, "switches": 0, "gateways": 0}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        try:
+            r = await client.get(
+                f"https://{host}/configuration/v2/groups/{quote(name, safe='')}/properties",
+                headers=headers)
+            if r.status_code == 200:
+                data = (r.json() or {}).get("data") or []
+                if data and isinstance(data[0], dict):
+                    props = data[0].get("properties") or data[0]
+        except Exception:
+            pass
+        for cat, path, key in (("aps", "/monitoring/v2/aps", "aps"),
+                               ("switches", "/monitoring/v1/switches", "switches"),
+                               ("gateways", "/monitoring/v1/gateways", "gateways")):
+            raw, _t, _sc = await _fetch_all(
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000"}, item_key=key)
+            for d in raw:
+                if _pick(d, "group_name", "group") == name:
+                    counts[cat] += 1
+                    if len(devices) < 40:
+                        devices.append(_pick(d, "name", "serial", default="?"))
+
+    def _prop(v: Any) -> Any:
+        return ", ".join(map(str, v)) if isinstance(v, list) else v
+
+    prop_src = {k: _prop(v) for k, v in props.items()}
+    summary = {"aps": counts["aps"], "switches": counts["switches"],
+               "gateways": counts["gateways"], "devices": ", ".join(devices) or "—"}
+    groups = [
+        _kv_group("Devices", summary, [
+            ("aps", "Access points"), ("switches", "Switches"), ("gateways", "Gateways"),
+            ("devices", "Members"),
+        ]),
+        _kv_group("Properties", prop_src, [
+            ("Architecture", "Architecture"), ("AOSVersion", "AOS version"),
+            ("ApNetworkRole", "AP network role"), ("GwNetworkRole", "Gateway network role"),
+            ("MonitorOnly", "Monitor only"), ("AllowedDevTypes", "Allowed device types"),
+            ("AllowedSwitchTypes", "Allowed switch types"), ("NewCentral", "New Central"),
+            ("Persona", "Persona"), ("GroupType", "Group type"),
+        ]),
+    ]
+    if not any(groups):
+        return None
+    return {
+        "title": name,
+        "subtitle": "Configuration group",
+        "status": "",
+        "groups": [g for g in groups if g],
+        "meta": {"kind": "group"},
     }
 
 
@@ -1387,6 +1501,7 @@ _DASH = {
         "overview": _classic_central_overview, "list": _classic_central_list,
         "client": _classic_central_client_detail, "device": _classic_central_device_detail,
         "site": _classic_central_site_detail, "topology": _classic_central_topology,
+        "group": _classic_central_group_detail,
     },
 }
 
@@ -1414,7 +1529,8 @@ async def overview(flavor: str, request: Request) -> JSONResponse:
 
 @app.get("/api/list/{flavor}/{entity}")
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
-    if entity not in {"clients", "access-points", "switches", "gateways", "sites", "subscriptions"}:
+    if entity not in {"clients", "access-points", "switches", "gateways", "sites",
+                      "subscriptions", "ap-groups"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -1427,12 +1543,15 @@ async def list_entity(flavor: str, entity: str, request: Request) -> JSONRespons
 
 @app.get("/api/detail/{flavor}/{kind}/{ident}")
 async def detail(flavor: str, kind: str, ident: str, request: Request) -> JSONResponse:
-    if kind not in ("client", "device", "site"):
+    if kind not in ("client", "device", "site", "group"):
         return _err(404, "Unknown detail type.")
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
-    data = await _DASH[flavor][kind](conn["host"], conn["access_token"], ident)
+    fn = _DASH[flavor].get(kind)
+    if fn is None:
+        return _err(404, f"{_FLAVOR_LABEL[flavor]} has no {kind} details.")
+    data = await fn(conn["host"], conn["access_token"], ident)
     if data is None:
         return _err(404, f"No {kind} found for '{ident}'.")
     return JSONResponse({"detail": data})
