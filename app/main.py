@@ -782,6 +782,385 @@ async def _classic_central_devices(host: str, token: str) -> Optional[dict[str, 
 
 
 # --------------------------------------------------------------------------- #
+# Classic Central — overview / lists / details / topology
+#
+# NOTE: the legacy Aruba Central monitoring APIs have not been exercised with a
+# real token yet. Field extraction is defensive (tries several key spellings);
+# expect a debugging pass once Classic credentials are available.
+# --------------------------------------------------------------------------- #
+def _pick(d: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    for k in keys:
+        v = d.get(k)
+        if v not in (None, "", []):
+            return v
+    return default
+
+
+def _classic_band(v: Any) -> Optional[str]:
+    s = str(v or "").strip().lower().replace("ghz", "").strip()
+    if not s:
+        return None
+    if s.startswith("2.4") or s == "2":
+        return "2.4 GHz"
+    if s.startswith("6"):
+        return "6 GHz"
+    if s.startswith("5"):
+        return "5 GHz"
+    return str(v)
+
+
+def _classic_up(v: Any) -> bool:
+    return str(v).strip().lower() in ("up", "online", "true", "1", "connected")
+
+
+CLASSIC_SOURCES = {
+    "clients": ("/monitoring/v1/clients", "clients"),
+    "access-points": ("/monitoring/v2/aps", "aps"),
+    "switches": ("/monitoring/v1/switches", "switches"),
+    "gateways": ("/monitoring/v1/gateways", "gateways"),
+}
+
+
+def _classic_norm_client(c: dict[str, Any]) -> dict[str, Any]:
+    conn = str(_pick(c, "connection", "client_type", "connection_type", default="")).upper()
+    wired = "WIRE" in conn and "WIRELESS" not in conn
+    band = None if wired else _classic_band(_pick(c, "band", "radio_band", "frequency"))
+    return {
+        "name": _pick(c, "name", "hostname", "username", "macaddr", default="—"),
+        "mac": _pick(c, "macaddr", "mac_address", "mac", default="—"),
+        "ip": _pick(c, "ip_address", "ipv4", "ip", default="—"),
+        "vlan": _pick(c, "vlan", "vlan_id", default="—"),
+        "band": "Wired" if wired else (band or "—"),
+        "channel": _pick(c, "channel", "wireless_channel", default="—"),
+        "snr": _pick(c, "snr", "signal_to_noise", default="—"),
+        "connType": "Wired" if wired else "Wireless",
+        "connectedTo": _pick(c, "associated_device_name", "connected_device_name",
+                             "associated_device_mac", "associated_device", default="—"),
+        "os": _pick(c, "os_type", "client_os", "operating_system", default="—"),
+        "site": _pick(c, "site", "site_name", default="—"),
+        "status": "Connected",
+    }
+
+
+def _classic_norm_device(d: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": _pick(d, "name", "hostname", "serial", default="—"),
+        "serial": _pick(d, "serial", "serial_number", default="—"),
+        "model": _pick(d, "model", "device_model", "part_number", default="—"),
+        "ip": _pick(d, "ip_address", "ipv4", "ip", default="—"),
+        "mac": _pick(d, "macaddr", "mac_address", "mac", default="—"),
+        "clients": _pick(d, "client_count", "clients", "connected_clients"),
+        "site": _pick(d, "site", "site_name", default="—"),
+        "firmware": _pick(d, "firmware_version", "firmware", default="—"),
+        "status": "Up" if _classic_up(_pick(d, "status", "state", default="")) else "Down",
+    }
+
+
+def _classic_norm_sub(s: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "description": _pick(s, "sku_description", "description", "license_type",
+                             "subscription_type", default="—"),
+        "sku": _pick(s, "sku", "subscription_key", default="—"),
+        "tier": _pick(s, "license_type", "tier", "subscription_type", default="—"),
+        "quantity": _pick(s, "quantity", "total", default="—"),
+        "available": _pick(s, "available_quantity", "available", default="—"),
+        "status": _pick(s, "status", "subscription_status", default="—"),
+        "end": str(_pick(s, "end_date", "expiry", default=""))[:10] or "—",
+        "eval": "Eval" if _pick(s, "is_eval", "evaluation", default=False) else "—",
+    }
+
+
+def _classic_norm_site(s: dict[str, Any], health: dict[str, Any]) -> dict[str, Any]:
+    name = _pick(s, "site_name", "name", default="—")
+    h = health.get(name, {})
+    dev_up = int(_pick(h, "device_up", "wired_device_up", default=0) or 0)
+    dev_dn = int(_pick(h, "device_down", "wired_device_down", default=0) or 0)
+    cl_ok = int(_pick(h, "connected_count", "client_connected_count", default=0) or 0)
+    cl_bad = int(_pick(h, "failed_count", "client_failed_count", default=0) or 0)
+    return {
+        "name": name,
+        "id": str(_pick(s, "site_id", "id", default="")),
+        "clients": cl_ok + cl_bad,
+        "clientHealth": {"poor": cl_bad, "fair": 0, "good": cl_ok},
+        "devices": dev_up + dev_dn or _pick(s, "associated_device_count", default=0),
+        "deviceHealth": {"poor": dev_dn, "fair": 0, "good": dev_up},
+        "alerts": int(_pick(h, "alert_count", default=0) or 0),
+        "city": _pick(s, "city", default="—"),
+        "country": _pick(s, "country", default="—"),
+    }
+
+
+async def _classic_branch_health(client: httpx.AsyncClient, host: str,
+                                 headers: dict[str, str]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    try:
+        rows, _t, _sc = await _fetch_all(
+            client, f"https://{host}/branchhealth/v1/site", headers,
+            style="offset", params={"limit": "100"}, item_key="items")
+        if not rows:
+            rows, _t, _sc = await _fetch_all(
+                client, f"https://{host}/branchhealth/v1/site", headers,
+                style="offset", params={"limit": "100"}, item_key="sites")
+        for r in rows:
+            out[_pick(r, "name", "site_name", default="")] = r
+    except Exception:
+        pass
+    return out
+
+
+async def _classic_central_overview(host: str, token: str) -> dict[str, Optional[int]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    out: dict[str, Optional[int]] = {
+        "clients": None, "accessPoints": None, "switches": None,
+        "gateways": None, "sites": None, "subscriptions": None,
+    }
+    probes = {
+        "clients": ("/monitoring/v1/clients", None),
+        "accessPoints": ("/monitoring/v2/aps", None),
+        "switches": ("/monitoring/v1/switches", None),
+        "gateways": ("/monitoring/v1/gateways", None),
+        "sites": ("/central/v2/sites", None),
+        "subscriptions": ("/platform/licensing/v1/subscriptions", None),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            results = await asyncio.gather(*[
+                _get_total(client, f"https://{host}{p}", headers,
+                           {"limit": "1", "calculate_total": "true"})
+                for p, _ in probes.values()
+            ])
+        for key, val in zip(probes.keys(), results):
+            out[key] = val
+    except Exception:
+        pass
+    return out
+
+
+async def _classic_central_list(host: str, token: str, entity: str
+                                ) -> tuple[Optional[list[dict[str, Any]]], int]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        if entity in CLASSIC_SOURCES:
+            path, key = CLASSIC_SOURCES[entity]
+            raw, total, sc = await _fetch_all(
+                client, f"https://{host}{path}", headers, style="offset",
+                params={"limit": "1000", "calculate_total": "true"}, item_key=key)
+            if sc != 200 and not raw:
+                return None, 0
+            norm = _classic_norm_client if entity == "clients" else _classic_norm_device
+            rows = [norm(x) for x in raw]
+        elif entity == "sites":
+            raw, total, sc = await _fetch_all(
+                client, f"https://{host}/central/v2/sites", headers, style="offset",
+                params={"limit": "1000", "calculate_total": "true"}, item_key="sites")
+            if sc != 200 and not raw:
+                return None, 0
+            health = await _classic_branch_health(client, host, headers)
+            rows = [_classic_norm_site(x, health) for x in raw]
+        elif entity == "subscriptions":
+            raw, total, sc = await _fetch_all(
+                client, f"https://{host}/platform/licensing/v1/subscriptions", headers,
+                style="offset", params={"limit": "1000"}, item_key="subscriptions")
+            if sc != 200 and not raw:
+                return None, 0
+            rows = [_classic_norm_sub(x) for x in raw]
+        else:
+            return None, 0
+    return rows, total if total is not None else len(rows)
+
+
+async def _classic_find(host: str, token: str, entity: str, match) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    if entity not in CLASSIC_SOURCES:
+        return None
+    path, key = CLASSIC_SOURCES[entity]
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        raw, _t, _sc = await _fetch_all(
+            client, f"https://{host}{path}", headers, style="offset",
+            params={"limit": "1000", "calculate_total": "true"}, item_key=key)
+    return next((x for x in raw if match(x)), None)
+
+
+async def _classic_central_client_detail(host: str, token: str, mac: str) -> Optional[dict[str, Any]]:
+    raw = await _classic_find(host, token, "clients",
+                              lambda c: str(_pick(c, "macaddr", "mac_address", "mac", default="")).lower() == mac.lower())
+    if not raw:
+        return None
+    wired = "WIRE" in str(_pick(raw, "connection", "client_type", default="")).upper()
+    groups = [
+        _kv_group("Identity", raw, [
+            ("name", "Name"), ("hostname", "Hostname"), ("macaddr", "MAC address"),
+            ("os_type", "Operating system"), ("client_category", "Category"), ("manufacturer", "Vendor"),
+        ]),
+        _kv_group("Connection", raw, [
+            ("connection", "Connection type"), ("associated_device_name", "Connected to"),
+            ("site", "Site"), ("group_name", "Group"), ("vlan", "VLAN"),
+            ("network", "SSID"), ("authentication_type", "Authentication"),
+        ]),
+        _kv_group("Network", raw, [("ip_address", "IPv4"), ("username", "User"), ("speed", "Speed")]),
+    ]
+    if not wired:
+        groups.append(_kv_group("Wireless", raw, [
+            ("band", "Band"), ("channel", "Channel"), ("snr", "SNR"), ("rssi", "RSSI"),
+            ("radio_number", "Radio"), ("health", "Health"),
+        ]))
+    return {
+        "title": _pick(raw, "name", "hostname", "macaddr", default="Client"),
+        "subtitle": _pick(raw, "macaddr", default=""),
+        "status": "Connected",
+        "groups": [g for g in groups if g],
+        "meta": {
+            "kind": "client",
+            "siteId": str(_pick(raw, "site_id", "site", default="")),
+            "focusSerial": _pick(raw, "associated_device", "associated_device_mac"),
+            "clientName": _pick(raw, "name", "hostname", "macaddr", default="Client"),
+            "clientMac": _pick(raw, "macaddr", default=""),
+            "clientIp": _pick(raw, "ip_address"),
+            "connType": "Wired" if wired else "Wireless",
+            "band": None if wired else _classic_band(_pick(raw, "band")),
+            "snr": _pick(raw, "snr"),
+            "channel": _pick(raw, "channel"),
+        },
+    }
+
+
+async def _classic_central_device_detail(host: str, token: str, serial: str) -> Optional[dict[str, Any]]:
+    raw = None
+    for entity in ("access-points", "switches", "gateways"):
+        raw = await _classic_find(
+            host, token, entity,
+            lambda d: str(_pick(d, "serial", "serial_number", default="")) == serial)
+        if raw:
+            break
+    if not raw:
+        return None
+    up = _classic_up(_pick(raw, "status", "state", default=""))
+    groups = [
+        _kv_group("Identity", raw, [
+            ("name", "Name"), ("serial", "Serial"), ("macaddr", "MAC address"),
+            ("model", "Model"), ("device_type", "Type"),
+        ]),
+        _kv_group("Status", raw, [
+            ("status", "Status"), ("uptime", "Uptime"), ("client_count", "Connected clients"),
+            ("firmware_version", "Firmware"), ("cpu_utilization", "CPU %"), ("mem_total", "Memory"),
+        ]),
+        _kv_group("Location", raw, [
+            ("site", "Site"), ("group_name", "Group"), ("ip_address", "IPv4"),
+            ("public_ip_address", "Public IP"), ("labels", "Labels"),
+        ]),
+    ]
+    return {
+        "title": _pick(raw, "name", "serial", default="Device"),
+        "subtitle": (_pick(raw, "model", default="") + " · " + _pick(raw, "serial", default="")).strip(" ·"),
+        "status": "Up" if up else "Down",
+        "groups": [g for g in groups if g],
+        "meta": {"kind": "device", "siteId": str(_pick(raw, "site_id", "site", default="")),
+                 "focusSerial": _pick(raw, "serial", "serial_number")},
+    }
+
+
+async def _classic_central_site_detail(host: str, token: str, site_id: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        raw, _t, _sc = await _fetch_all(
+            client, f"https://{host}/central/v2/sites", headers, style="offset",
+            params={"limit": "1000"}, item_key="sites")
+        health = await _classic_branch_health(client, host, headers)
+    match = next((x for x in raw if str(_pick(x, "site_id", "id", default="")) == str(site_id)
+                  or _pick(x, "site_name", "name") == site_id), None)
+    if not match:
+        return None
+    row = _classic_norm_site(match, health)
+    src = {
+        "clients": row["clients"], "devices": row["devices"], "alerts": row["alerts"],
+        "cGood": row["clientHealth"]["good"], "cPoor": row["clientHealth"]["poor"],
+        "dGood": row["deviceHealth"]["good"], "dPoor": row["deviceHealth"]["poor"],
+        "address": _pick(match, "address"), "city": _pick(match, "city"),
+        "state": _pick(match, "state"), "zip": _pick(match, "zipcode", "zip"),
+        "country": _pick(match, "country"), "lat": _pick(match, "latitude"),
+        "long": _pick(match, "longitude"), "id": row["id"],
+    }
+    groups = [
+        _kv_group("Overview", src, [
+            ("clients", "Clients"), ("devices", "Devices"), ("alerts", "Open alerts"), ("id", "Site ID")]),
+        _kv_group("Client health", src, [("cGood", "Connected"), ("cPoor", "Failed")]),
+        _kv_group("Device health", src, [("dGood", "Up"), ("dPoor", "Down")]),
+        _kv_group("Address", src, [
+            ("address", "Street"), ("city", "City"), ("state", "State"),
+            ("zip", "Postcode"), ("country", "Country")]),
+        _kv_group("Location", src, [("lat", "Latitude"), ("long", "Longitude")]),
+    ]
+    return {
+        "title": row["name"],
+        "subtitle": ", ".join(p for p in (src["city"], src["country"]) if p),
+        "status": "",
+        "groups": [g for g in groups if g],
+        "meta": {"kind": "site", "siteId": row["id"] or row["name"]},
+    }
+
+
+async def _classic_central_topology(host: str, token: str, site_id: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            r = await client.get(
+                f"https://{host}/topology_external/v1/topology/{site_id}", headers=headers)
+        if r.status_code != 200:
+            return None
+        body = r.json()
+    except Exception:
+        return None
+    root = body.get("result") or body.get("topology") or body
+    raw_nodes = root.get("nodes") or root.get("devices") or []
+    raw_links = root.get("links") or root.get("edges") or []
+
+    nodes: dict[str, dict[str, Any]] = {}
+    for d in raw_nodes:
+        s = _pick(d, "serial", "serialNumber", "id", "name")
+        if not s:
+            continue
+        nodes[s] = {
+            "serial": s,
+            "name": _pick(d, "name", "hostname", default=s),
+            "type": _topo_node_type({
+                "type": _pick(d, "deviceType", "device_type", "type", default=""),
+                "deviceFunction": _pick(d, "role", "deviceRole", default=""),
+                "name": _pick(d, "name", default=""),
+            }),
+            "model": _pick(d, "model", default=""),
+            "function": _pick(d, "role", "deviceRole", default=""),
+            "ip": _pick(d, "ip_address", "ipAddress", "ipv4", default=""),
+            "mac": _pick(d, "macaddr", "macRange", "mac", default=""),
+            "status": _pick(d, "status", "state", default=""),
+            "health": _pick(d, "health", default=""),
+            "unmanaged": bool(_pick(d, "unmanaged", default=False)),
+        }
+    links: list[dict[str, Any]] = []
+    for lk in raw_links:
+        f = _pick(lk, "source", "from", "sourceSerial", "src")
+        t = _pick(lk, "target", "to", "destSerial", "dst")
+        if not f or not t:
+            continue
+        for endp in (f, t):
+            if endp not in nodes:
+                nodes[endp] = {"serial": endp, "name": str(endp), "type": "other",
+                               "model": "", "function": "", "ip": "", "mac": "",
+                               "status": "", "health": "", "unmanaged": True}
+        links.append({
+            "from": f, "to": t,
+            "speed": _fmt_speed(_pick(lk, "speed", "linkSpeed", default=0)),
+            "edgeType": _pick(lk, "type", "edgeType", default=""),
+            "fromPort": _pick(lk, "sourceIfName", "sourcePort", "fromPort", default=""),
+            "toPort": _pick(lk, "destIfName", "destPort", "toPort", default=""),
+            "health": _pick(lk, "health", "status", default=""),
+        })
+    if not nodes:
+        return None
+    return {"nodes": list(nodes.values()), "links": links,
+            "isolated": body.get("isolatedDevicesCount", 0)}
+
+
+# --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
 @app.get("/healthz")
@@ -877,65 +1256,75 @@ async def connect_new(request: Request) -> JSONResponse:
     return _attach_cookie(JSONResponse(_state(sess)), sid)
 
 
-@app.get("/api/overview/new")
-async def overview_new(request: Request) -> JSONResponse:
+_FLAVORS = ("new", "classic")
+_FLAVOR_LABEL = {"new": "New Central", "classic": "Classic Central"}
+_DASH = {
+    "new": {
+        "overview": _new_central_overview, "list": _new_central_list,
+        "client": _new_central_client_detail, "device": _new_central_device_detail,
+        "site": _new_central_site_detail, "topology": _new_central_topology,
+    },
+    "classic": {
+        "overview": _classic_central_overview, "list": _classic_central_list,
+        "client": _classic_central_client_detail, "device": _classic_central_device_detail,
+        "site": _classic_central_site_detail, "topology": _classic_central_topology,
+    },
+}
+
+
+def _dash_conn(request: Request, flavor: str) -> tuple[Optional[dict[str, Any]], Optional[JSONResponse]]:
+    if flavor not in _FLAVORS:
+        return None, _err(404, "Unknown environment.")
     sess = _get(request)
-    conn = sess.get("new") if sess else None
+    conn = sess.get(flavor) if sess else None
     if not conn:
-        return _err(409, "Connect New Central first.")
+        return None, _err(409, f"Connect {_FLAVOR_LABEL[flavor]} first.")
     if conn.get("expires_at", 0) < _now():
-        return _err(401, "The access token has expired — reconnect New Central.")
-    data = await _new_central_overview(conn["host"], conn["access_token"])
+        return None, _err(401, f"The access token has expired — reconnect {_FLAVOR_LABEL[flavor]}.")
+    return conn, None
+
+
+@app.get("/api/overview/{flavor}")
+async def overview(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    data = await _DASH[flavor]["overview"](conn["host"], conn["access_token"])
     return JSONResponse({"overview": data})
 
 
-@app.get("/api/list/new/{entity}")
-async def list_new(entity: str, request: Request) -> JSONResponse:
-    valid = {"clients", "access-points", "switches", "gateways", "sites", "subscriptions"}
-    if entity not in valid:
+@app.get("/api/list/{flavor}/{entity}")
+async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
+    if entity not in {"clients", "access-points", "switches", "gateways", "sites", "subscriptions"}:
         return _err(404, "Unknown entity.")
-    sess = _get(request)
-    conn = sess.get("new") if sess else None
-    if not conn:
-        return _err(409, "Connect New Central first.")
-    if conn.get("expires_at", 0) < _now():
-        return _err(401, "The access token has expired — reconnect New Central.")
-    rows, _ = await _new_central_list(conn["host"], conn["access_token"], entity)
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    rows, _ = await _DASH[flavor]["list"](conn["host"], conn["access_token"], entity)
     if rows is None:
         return _err(502, f"Central did not return {entity.replace('-', ' ')} for this API client.")
     return JSONResponse({"rows": rows, "total": len(rows)})
 
 
-@app.get("/api/detail/new/{kind}/{ident}")
-async def detail_new(kind: str, ident: str, request: Request) -> JSONResponse:
+@app.get("/api/detail/{flavor}/{kind}/{ident}")
+async def detail(flavor: str, kind: str, ident: str, request: Request) -> JSONResponse:
     if kind not in ("client", "device", "site"):
         return _err(404, "Unknown detail type.")
-    sess = _get(request)
-    conn = sess.get("new") if sess else None
-    if not conn:
-        return _err(409, "Connect New Central first.")
-    if conn.get("expires_at", 0) < _now():
-        return _err(401, "The access token has expired — reconnect New Central.")
-    if kind == "client":
-        data = await _new_central_client_detail(conn["host"], conn["access_token"], ident)
-    elif kind == "site":
-        data = await _new_central_site_detail(conn["host"], conn["access_token"], ident)
-    else:
-        data = await _new_central_device_detail(conn["host"], conn["access_token"], ident)
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    data = await _DASH[flavor][kind](conn["host"], conn["access_token"], ident)
     if data is None:
         return _err(404, f"No {kind} found for '{ident}'.")
     return JSONResponse({"detail": data})
 
 
-@app.get("/api/topology/new/{site_id}")
-async def topology_new(site_id: str, request: Request) -> JSONResponse:
-    sess = _get(request)
-    conn = sess.get("new") if sess else None
-    if not conn:
-        return _err(409, "Connect New Central first.")
-    if conn.get("expires_at", 0) < _now():
-        return _err(401, "The access token has expired — reconnect New Central.")
-    data = await _new_central_topology(conn["host"], conn["access_token"], site_id)
+@app.get("/api/topology/{flavor}/{site_id}")
+async def topology(flavor: str, site_id: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    data = await _DASH[flavor]["topology"](conn["host"], conn["access_token"], site_id)
     if data is None:
         return _err(502, "Central did not return topology for this site.")
     return JSONResponse(data)
