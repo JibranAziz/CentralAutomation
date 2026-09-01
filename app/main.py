@@ -1918,6 +1918,99 @@ async def topology(flavor: str, site_id: str, request: Request) -> JSONResponse:
     return JSONResponse(data)
 
 
+# --------------------------------------------------------------------------- #
+# Configuration writes (Classic Central only)
+# --------------------------------------------------------------------------- #
+@app.get("/api/config/{flavor}/groups")
+async def config_groups(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return JSONResponse({"groups": []})
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        names, _sc = await _classic_group_names(cx, conn["host"], hdr)
+    return JSONResponse({"groups": sorted(names or [], key=str.lower)})
+
+
+async def _classic_push(host: str, token: str, method: str, path: str,
+                        body: Optional[dict[str, Any]]) -> tuple[bool, int, str]:
+    hdr = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+           "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as cx:
+            r = await cx.request(method, f"https://{host}{path}", headers=hdr, json=body)
+        ok = 200 <= r.status_code < 300
+        msg = "" if ok else (r.text or "")[:300]
+        return ok, r.status_code, msg
+    except Exception as exc:  # pragma: no cover
+        return False, 0, str(exc)[:200]
+
+
+@app.post("/api/config/{flavor}/ssid")
+async def config_ssid(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "SSID configuration is only available for Classic Central.")
+    b = await request.json()
+    ssid = (b.get("ssid") or "").strip()
+    groups = [g for g in (b.get("groups") or []) if g]
+    kind = (b.get("type") or "employee").strip().lower()
+    passphrase = b.get("passphrase") or ""
+    vlan = str(b.get("vlan") or "1").strip()
+    if not ssid or not groups:
+        return _err(400, "SSID name and at least one AP group are required.")
+    if kind not in ("employee", "guest"):
+        kind = "employee"
+    if kind == "employee" and len(passphrase) < 8:
+        return _err(400, "A passphrase of at least 8 characters is required for an employee SSID.")
+
+    wlan: dict[str, Any] = {"essid": ssid, "type": kind, "vlan": vlan,
+                            "hide_ssid": bool(b.get("hideSsid"))}
+    if kind == "employee":
+        wlan["wpa_passphrase"] = passphrase
+        wlan["wpa_passphrase_changed"] = True
+
+    results = []
+    for g in groups:
+        ok, sc, msg = await _classic_push(
+            conn["host"], conn["access_token"], "POST",
+            f"/configuration/v2/wlan/{quote(g, safe='')}/{quote(ssid, safe='')}", wlan)
+        results.append({"group": g, "ok": ok, "status": sc, "error": msg})
+    return JSONResponse({"results": results})
+
+
+@app.post("/api/config/{flavor}/radius")
+async def config_radius(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "RADIUS configuration is only available for Classic Central.")
+    b = await request.json()
+    name = (b.get("name") or "").strip()
+    ip = (b.get("ip") or "").strip()
+    secret = b.get("secret") or ""
+    groups = [g for g in (b.get("groups") or []) if g]
+    auth_port = str(b.get("authPort") or "1812").strip()
+    if not (name and ip and secret and groups):
+        return _err(400, "Server name, IP, shared secret and at least one AP group are required.")
+
+    body = {"name": name, "ip_address": ip, "auth_port": auth_port,
+            "acct_port": str(b.get("acctPort") or "1813").strip(),
+            "shared_secret": secret, "shared_secret_changed": True}
+    results = []
+    for g in groups:
+        ok, sc, msg = await _classic_push(
+            conn["host"], conn["access_token"], "POST",
+            f"/configuration/v2/radius_servers/{quote(g, safe='')}/{quote(name, safe='')}", body)
+        results.append({"group": g, "ok": ok, "status": sc, "error": msg})
+    return JSONResponse({"results": results})
+
+
 @app.post("/api/refresh/{kind}")
 async def refresh(kind: str, request: Request) -> JSONResponse:
     if kind not in ("classic", "new"):

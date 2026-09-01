@@ -132,6 +132,21 @@ verified live (7); Classic SSID path analogous, not re-verified.
   - subscriptions: `/platform/licensing/v1/subscriptions` (`total` works); item
     `license_type`, `sku`, `quantity`, `available`, `status`, `end_date` (epoch ms
     → `_epoch_date`), `subscription_type` ("EVAL").
+  - **SSIDs**: `GET /configuration/v1/wlan/{group}` (v2 404s) →
+    `{wlans:[{essid,name,type}]}`, one per group (5-wide semaphore + `_retry_get`).
+    Merged with `/monitoring/v2/networks` (7 AOS10 SSIDs, essid/security/type) and
+    the wireless clients list for live band/VLAN/client counts. Detail also GETs
+    `/configuration/v1/wlan/{group}/{ssid}` → `{wlan:{essid,type,vlan,hide_ssid,
+    wpa_passphrase,captive_profile_name,zone,access_rules,...}}`. Verified: 40
+    SSIDs across 27 groups.
+  - **Configuration writes** (`/api/config/classic/*`, Classic only): `GET
+    .../groups` feeds the group multi-select; `POST .../ssid` →
+    `POST /configuration/v2/wlan/{group}/{ssid}` per group with `{essid, type
+    (employee|guest), vlan, hide_ssid[, wpa_passphrase, wpa_passphrase_changed]}`
+    — endpoint confirmed by the GET + docs, **the write itself is untested**.
+    `POST .../radius` → `POST /configuration/v2/radius_servers/{group}/{name}` is
+    a **guess** — every RADIUS-server path probed returned 404; the real endpoint
+    is still unknown.
   - **topology**: `GET /topology_external_api/{site_id}` (int id) →
     `{devices, edges(fromIf/toIf), tunnels, rootNodes}`; `role` ∈
     IAP/Switch/Controller/VPNC/SECURITYCLOUD → node type; `rootNodes` → `roots`,
