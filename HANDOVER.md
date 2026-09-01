@@ -92,10 +92,17 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `POST /api/disconnect/{classic\|new}` | drop that connection from the session |
 | `POST /api/refresh/{classic\|new}` | re-poll device up/down using the stored token |
 | `POST /api/webhooks/{classic\|new}` | `{enabled?, regenerate?}` — session-only webhook key toggle |
-| `GET /api/overview/new` | Account Overview card counts |
-| `GET /api/list/new/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions — normalized rows |
-| `GET /api/detail/new/{client\|device\|site}/{id}` | grouped detail + `meta` (siteId, focusSerial); client id = MAC, device id = serial, site id = site id |
-| `GET /api/topology/new/{site-id}` | normalized `{nodes, links, isolated}` for the topology diagram |
+| `GET /api/overview/{flavor}` | Account Overview card counts (incl. `apGroups` [classic], `ssids`) |
+| `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids — normalized rows |
+| `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid) |
+| `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
+
+`flavor` ∈ `new` \| `classic`. SSIDs card is on both flavors (New:
+`/network-monitoring/v1/wlans`, Classic: `/monitoring/v{2,1}/networks`); its
+detail shows config + a member grid of the wireless clients on that SSID
+(matched by `wlanName`/`network`). Member grid items carry `kind`
+(`device`/`client`) so each card opens the right detail page. New Central SSIDs
+verified live (7); Classic SSID path analogous, not re-verified.
 
 ## Aruba Central API usage (upstream)
 
