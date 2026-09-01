@@ -385,6 +385,7 @@
   #entity-topo { margin-top: 18px; grid-column: 1 / -1; }
   .topo-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
   .topo-note { font-size: 11.5px; color: var(--faint); }
+  #topo-reset { margin-left: auto; }
   .topo-wrap {
     overflow-x: auto; border: 1px solid var(--border); border-radius: 14px;
     background:
@@ -772,6 +773,7 @@
             <div class="topo-head">
               <span class="panel-head" style="margin:0">Topology</span>
               <span class="topo-note" id="topo-note"></span>
+              <button class="linkbtn" type="button" id="topo-reset" hidden>Reset layout</button>
             </div>
             <div class="topo-wrap" id="topo-wrap"></div>
             <div class="topo-legend" id="topo-legend"></div>
@@ -1198,11 +1200,21 @@
         note.textContent = (res.body && res.body.error) || "Topology unavailable for this site.";
         return;
       }
+      lastTopo = { data: res.body, meta: meta };
       drawTopology(wrap, legend, note, res.body, meta);
     });
   }
 
+  var lastTopo = null;
+  document.getElementById("topo-reset").addEventListener("click", function () {
+    if (!lastTopo) return;
+    drawTopology(document.getElementById("topo-wrap"), document.getElementById("topo-legend"),
+      document.getElementById("topo-note"), lastTopo.data, lastTopo.meta);
+  });
+
   function drawTopology(wrap, legend, note, data, meta) {
+    var resetBtn = document.getElementById("topo-reset");
+    resetBtn.hidden = true;
     var nodes = {};
     data.nodes.forEach(function (n) { nodes[n.serial] = { n: n, adj: [] }; });
     var links = data.links.filter(function (l) { return nodes[l.from] && nodes[l.to]; });
@@ -1415,6 +1427,7 @@
         g.classList.remove("dragging");
         try { g.releasePointerCapture(e.pointerId); } catch (err) {}
         g._dragged = moved > 4;
+        if (g._dragged) resetBtn.hidden = false;
         setTimeout(function () { g._dragged = false; }, 0);
       }
       g.addEventListener("pointerup", endDrag);
