@@ -1063,15 +1063,28 @@ def _group_names_from(items: Any) -> list[str]:
     return [n for n in out if n]
 
 
+async def _retry_get(client: httpx.AsyncClient, url: str, headers: dict[str, str],
+                     params: Optional[dict[str, Any]] = None, tries: int = 3):
+    r = None
+    for i in range(tries):
+        try:
+            r = await client.get(url, headers=headers, params=params or {})
+            if r.status_code == 200 or r.status_code not in (429, 500, 502, 503, 504):
+                return r
+        except Exception:
+            r = None
+        if i < tries - 1:
+            await asyncio.sleep(0.5 * (i + 1))
+    return r
+
+
 async def _classic_group_names(client: httpx.AsyncClient, host: str,
                                headers: dict[str, str]) -> tuple[Optional[list[str]], int]:
     # Classic config endpoints cap `limit` at 20.
     last_sc = 0
     for path in ("/configuration/v2/groups", "/configuration/v1/groups"):
-        try:
-            r = await client.get(f"https://{host}{path}", headers=headers,
-                                 params={"limit": 20, "offset": 0})
-        except Exception:
+        r = await _retry_get(client, f"https://{host}{path}", headers, {"limit": 20, "offset": 0})
+        if r is None:
             continue
         last_sc = r.status_code
         if r.status_code != 200:
@@ -1082,12 +1095,9 @@ async def _classic_group_names(client: httpx.AsyncClient, host: str,
         total = int(body.get("total") or 0)
         offset = 20
         while len(names) < total and offset < 4000:
-            try:
-                r2 = await client.get(f"https://{host}{path}", headers=headers,
-                                      params={"limit": 20, "offset": offset})
-            except Exception:
-                break
-            if r2.status_code != 200:
+            r2 = await _retry_get(client, f"https://{host}{path}", headers,
+                                  {"limit": 20, "offset": offset})
+            if r2 is None or r2.status_code != 200:
                 break
             b2 = r2.json() if r2.content else {}
             more = _group_names_from(b2.get("data") or b2.get("groups") or [])
@@ -1351,17 +1361,16 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
     """All SSIDs across every AP group (config) merged with monitoring stats."""
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, dict[str, Any]] = {}
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=45.0) as client:
         names, _sc = await _classic_group_names(client, host, headers)
+        sem = asyncio.Semaphore(5)   # config API rate-limits hard under a burst
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]]]:
+          async with sem:
             for path in (f"/configuration/v2/wlan/{quote(g, safe='')}",
                          f"/configuration/v1/wlan/{quote(g, safe='')}"):
-                try:
-                    r = await client.get(f"https://{host}{path}", headers=headers)
-                except Exception:
-                    continue
-                if r.status_code != 200:
+                r = await _retry_get(client, f"https://{host}{path}", headers)
+                if r is None or r.status_code != 200:
                     continue
                 body = r.json() if r.content else {}
                 wl = body.get("wlans") or body.get("data") or body.get("ssids") or []
