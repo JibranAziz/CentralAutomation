@@ -399,7 +399,9 @@
   @keyframes topoflow { to { stroke-dashoffset: -13; } }
   @media (prefers-reduced-motion: reduce) { .topo-link.active { animation: none; } }
   .topo-node { cursor: default; }
-  .topo-node.link { cursor: pointer; }
+  .topo-node.draggable { cursor: grab; touch-action: none; }
+  .topo-node.dragging { cursor: grabbing; }
+  .topo-node.dragging rect.card { filter: brightness(1.04); }
   .topo-node rect.card {
     fill: var(--surface); stroke: var(--border-strong); stroke-width: 1.2;
   }
@@ -417,6 +419,7 @@
   .topo-legend .sw.dashed { background-image: none !important; border: 1px dashed var(--faint); height: 0; }
   .topo-linklabel rect { fill: var(--surface); stroke: var(--accent-line); stroke-width: 1; }
   .topo-linklabel text { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
+  .topo-node image, .topo-node text { pointer-events: none; }
   .topo-node text.nm { fill: var(--ink); font-size: 11px; font-weight: 600; }
   .topo-node text.ip { fill: var(--muted); font-size: 10px; font-family: var(--mono); }
   .topo-node text.sub { fill: var(--faint); font-size: 9.5px; }
@@ -1300,12 +1303,20 @@
       svg.appendChild(el("text", { x: 12, y: PADY + k * ROWH + NH / 2 + 3, class: "topo-layer-label" })).textContent = name;
     });
 
-    var pendingLabels = [];
+    function pathD(a, b) {
+      var midY = (a.y + b.y) / 2;
+      return "M " + a.x + " " + a.y + " C " + a.x + " " + midY + " " + b.x + " " + midY + " " + b.x + " " + b.y;
+    }
+
+    var linkEls = [];        // {el, from, to}
+    var labelEls = [];       // {g, w, from, to}
+    var nodeLinks = {};      // serial -> [linkEl | labelEl]
+    function register(serial, obj) { (nodeLinks[serial] = nodeLinks[serial] || []).push(obj); }
+
     links.forEach(function (l) {
       var a = pos[l.from], b = pos[l.to];
       if (!a || !b) return;
-      var midY = (a.y + b.y) / 2;
-      var p = el("path", { d: "M " + a.x + " " + a.y + " C " + a.x + " " + midY + " " + b.x + " " + midY + " " + b.x + " " + b.y });
+      var p = el("path", { d: pathD(a, b) });
       var cls = "topo-link";
       if (onPathL[l.from + "|" + l.to]) cls += " active";
       else if (String(l.health).toLowerCase() === "poor") cls += " down";
@@ -1314,15 +1325,49 @@
         .filter(Boolean).join("  ·  ");
       if (tip) { var t = el("title", {}); t.textContent = tip; p.appendChild(t); }
       svg.appendChild(p);
-      if (l.label) pendingLabels.push({ label: l.label, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+      var le = { el: p, from: l.from, to: l.to, kind: "link" };
+      linkEls.push(le); register(l.from, le); register(l.to, le);
+
+      if (l.label) {
+        var w2 = l.label.length * 5.6 + 16;
+        var lg = el("g", { class: "topo-linklabel" });
+        lg.appendChild(el("rect", { x: -w2 / 2, y: -10, width: w2, height: 20, rx: 10 }));
+        var tx = el("text", { x: 0, y: 4, "text-anchor": "middle" }); tx.textContent = l.label;
+        lg.appendChild(tx);
+        var lbl = { g: lg, from: l.from, to: l.to, kind: "label" };
+        labelEls.push(lbl); register(l.from, lbl); register(l.to, lbl);
+      }
     });
+
+    function placeLabel(lb) {
+      var a = pos[lb.from], b = pos[lb.to];
+      // sit near the lower (child) end so it stays clear of other node rows
+      var f = a.y === b.y ? 0.5 : 0.78;
+      lb.g.setAttribute("transform", "translate(" + (a.x + (b.x - a.x) * f) + " " + (a.y + (b.y - a.y) * f) + ")");
+    }
+
+    function nodeTransform(s) {
+      return "translate(" + (pos[s].x - pos[s].w / 2) + " " + (pos[s].y - NH / 2) + ")";
+    }
+    function refresh(serial) {
+      (nodeLinks[serial] || []).forEach(function (o) {
+        if (o.kind === "link") o.el.setAttribute("d", pathD(pos[o.from], pos[o.to]));
+        else placeLabel(o);
+      });
+    }
+
+    function clientToSvg(cx, cy) {
+      var pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+      var m = svg.getScreenCTM();
+      return m ? pt.matrixTransform(m.inverse()) : { x: cx, y: cy };
+    }
 
     order.forEach(function (s) {
       var nd = nodes[s].n, p = pos[s], W = p.w;
-      var g = el("g", { class: "topo-node", transform: "translate(" + (p.x - W / 2) + " " + (p.y - NH / 2) + ")" });
+      var g = el("g", { class: "topo-node", transform: nodeTransform(s) });
       var unmanaged = isUnmanaged(s);
       var synthetic = s.indexOf("__") === 0;
-      var cls = "topo-node";
+      var cls = "topo-node draggable";
       if (unmanaged) cls += " unmanaged";
       else if (String(nd.health).toLowerCase() === "good") cls += " good";
       else if (String(nd.health).toLowerCase() === "poor") cls += " poor";
@@ -1342,9 +1387,42 @@
       }
       var sube = el("text", { class: "sub", x: ICON_L, y: ipt ? 54 : 40 });
       sube.textContent = trunc(subText(s), 42); g.appendChild(sube);
+
+      // drag
+      var dragStart = null, dragFrom = null, moved = 0;
+      g.addEventListener("pointerdown", function (e) {
+        if (e.button != null && e.button > 0) return;
+        dragStart = clientToSvg(e.clientX, e.clientY);
+        dragFrom = { x: pos[s].x, y: pos[s].y };
+        moved = 0;
+        try { g.setPointerCapture(e.pointerId); } catch (err) {}
+        g.classList.add("dragging");
+        e.preventDefault();
+      });
+      g.addEventListener("pointermove", function (e) {
+        if (!dragStart) return;
+        var cur = clientToSvg(e.clientX, e.clientY);
+        var dx = cur.x - dragStart.x, dy = cur.y - dragStart.y;
+        moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+        pos[s].x = dragFrom.x + dx;
+        pos[s].y = dragFrom.y + dy;
+        g.setAttribute("transform", nodeTransform(s));
+        refresh(s);
+      });
+      function endDrag(e) {
+        if (!dragStart) return;
+        dragStart = null;
+        g.classList.remove("dragging");
+        try { g.releasePointerCapture(e.pointerId); } catch (err) {}
+        g._dragged = moved > 4;
+        setTimeout(function () { g._dragged = false; }, 0);
+      }
+      g.addEventListener("pointerup", endDrag);
+      g.addEventListener("pointercancel", endDrag);
+
       if (!synthetic) {
-        g.style.cursor = "pointer";
         g.addEventListener("click", function () {
+          if (g._dragged) return;
           if (unmanaged) {
             note.textContent = nd.name + " is connected to your network but is not managed by Aruba Central — no live monitoring or configuration for this device.";
           } else {
@@ -1358,23 +1436,14 @@
       svg.appendChild(g);
     });
 
-    // link labels (band / SNR on the client link) — drawn above nodes
-    pendingLabels.forEach(function (pl) {
-      var w2 = pl.label.length * 5.6 + 16;
-      var lg = el("g", { class: "topo-linklabel", transform: "translate(" + pl.x + " " + pl.y + ")" });
-      lg.appendChild(el("rect", { x: -w2 / 2, y: -10, width: w2, height: 20, rx: 10 }));
-      var tx = el("text", { x: 0, y: 4, "text-anchor": "middle" });
-      tx.textContent = pl.label;
-      lg.appendChild(tx);
-      svg.appendChild(lg);
-    });
+    labelEls.forEach(function (lb) { placeLabel(lb); svg.appendChild(lb.g); });
 
     wrap.innerHTML = "";
     wrap.appendChild(svg);
     var iso = data.isolated || 0;
     note.textContent = (focusMissing ? "This device has no topology links — showing the site graph. " : "")
       + (order.length - 1) + " connected node" + (order.length - 1 === 1 ? "" : "s")
-      + (iso ? " · " + iso + " not linked" : "") + " · click a device to open it";
+      + (iso ? " · " + iso + " not linked" : "") + " · click to open, drag to rearrange";
     legend.innerHTML = "";
     [["Active path", "var(--accent)", ""], ["Link", "var(--border-strong)", ""],
      ["Degraded", "var(--down)", ""], ["Not managed by Central", "var(--faint)", "dashed"]]
