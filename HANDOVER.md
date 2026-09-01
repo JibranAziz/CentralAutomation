@@ -133,6 +133,16 @@ curl -sk https://centralautomation.arubademo.online/healthz \
   - client/device/site detail: found by scanning the list responses.
 - AOS-8 Instant APs with no site assignment return an empty siteId → their
   topology section shows "unavailable" (expected).
+- Classic topology drops generic placeholder nodes by name (`inet`, `wifi-sta`,
+  etc. — see `_TOPO_DROP`); the diagram synthesises its own Internet + client
+  nodes.
+
+## Branding
+
+- Header logo: `app/static/logo.jpg` (from `~/images/Untitled.jpg`). AI-generated,
+  and its cloud/swoosh resembles the real Aruba mark — flagged for the user; kept
+  at their request. Swap before any real public launch if that's a concern.
+- Favicon: inline Wi-Fi-signal SVG data URI in the `<link rel="icon">`.
 
 ### Dashboard wiring (frontend)
 
