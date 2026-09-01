@@ -571,6 +571,9 @@ def _kv_group(label: str, source: dict[str, Any], spec: list[tuple[str, str]]) -
 
 def _client_detail(c: dict[str, Any]) -> dict[str, Any]:
     wireless = str(c.get("clientConnectionType", "")).lower() == "wireless"
+    if not c.get("snr"):  # Central reports 0 when SNR is unavailable (e.g. some 6 GHz clients)
+        c = dict(c)
+        c["snr"] = None
     groups = [
         _kv_group("Identity", c, [
             ("hostName", "Hostname"), ("clientName", "Client name"), ("macAddress", "MAC address"),
