@@ -114,8 +114,8 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `POST /api/refresh/{classic\|new}` | re-poll device up/down using the stored token |
 | `POST /api/webhooks/{classic\|new}` | `{enabled?, regenerate?}` — session-only webhook key toggle |
 | `GET /api/overview/{flavor}` | all card counts in one shot (legacy; UI no longer uses it) |
-| `GET /api/overview/{flavor}/{group}` | one metric group — `clients` \| `devices` \| `sites` \| `subscriptions` \| `ssids` \| `apGroups`; UI fires all 6 in parallel and fills each card as it resolves, with a progress-chip row |
-| `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids — normalized rows |
+| `GET /api/overview/{flavor}/{group}` | one metric group — `clients` \| `devices` \| `sites` \| `subscriptions` \| `ssids` \| `apGroups` \| `rfProfiles`; UI fires them all in parallel and fills each card as it resolves, with a progress-chip row. `apGroups` + `rfProfiles` are Classic-only (hidden for New via `NEW_ONLY_HIDE`) |
+| `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids, rf-profiles — normalized rows |
 | `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid) |
 | `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
 
@@ -156,10 +156,22 @@ verified live (7); Classic SSID path analogous, not re-verified.
   - **SSIDs**: `GET /configuration/v1/wlan/{group}` (v2 404s) →
     `{wlans:[{essid,name,type}]}`, one per group (5-wide semaphore + `_retry_get`).
     Merged with `/monitoring/v2/networks` (7 AOS10 SSIDs, essid/security/type) and
-    the wireless clients list for live band/VLAN/client counts. Detail also GETs
-    `/configuration/v1/wlan/{group}/{ssid}` → `{wlan:{essid,type,vlan,hide_ssid,
-    wpa_passphrase,captive_profile_name,zone,access_rules,...}}`. Verified: 40
-    SSIDs across 27 groups.
+    the wireless clients list for live band/VLAN/client counts. For SSIDs with no
+    connected clients, band + VLAN fall back to the per-group AP-CLI:
+    `_cli_ssid_cfg` parses `wlan ssid-profile` blocks (`rf-band` / `allowed-band`
+    → band label, `vlan` → VLAN), keyed by inner `essid` where present else the
+    profile name; `_ssid_row` uses `cfgBands` / `cfgVlan` when the live values are
+    absent. Detail also GETs `/configuration/v1/wlan/{group}/{ssid}` →
+    `{wlan:{essid,type,vlan,hide_ssid,wpa_passphrase,captive_profile_name,zone,
+    access_rules,...}}`. Verified: 40 SSIDs across 27 groups.
+  - **RF Profiles** (Classic-only card, like AP Groups): `_classic_rf_profiles`
+    fetches each group's AP-CLI (5-wide semaphore) and `_cli_rf_profiles` pulls
+    named `rf <kind>-radio-profile "<name>"` block headers (`dot11a` → 5 GHz,
+    `dot11g` → 2.4 GHz, `dot11-6ghz` → 6 GHz; unnamed singleton `rf arm-profile`
+    etc. are skipped). Card count = distinct profile names; list rows =
+    name / radios / the AP groups whose CLI defines them. No drill-down.
+    Overview part returns `0` (not `null`) when groups exist but define no named
+    profiles, so the card shows 0 rather than retrying.
   - **Configuration writes** — see the "CLI-based configuration push" section
     below (the structured `/configuration/v2/wlan` approach was dropped because it
     can't express dot1x/RADIUS).
