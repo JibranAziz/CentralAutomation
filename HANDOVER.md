@@ -246,3 +246,27 @@ suppresses the click-to-open). Applies to both New and Classic (shared code).
 
 - Dev box: `~/Documents/aruba-central-automation` (will be the git clone).
 - Test tenant: HPE-internal New Central, cluster `internal.api.central.arubanetworks.com`.
+
+## CLI-based configuration push (Classic, AP-CLI)
+
+The Configuration section (Classic tab) uses the **AP-CLI** API, the same way
+Central Automation Studio does:
+- `GET /configuration/v1/ap_cli/{group}` → `{clis:[...]}` — the group's full CLI
+- `POST /configuration/v1/ap_cli/{group}` `{clis:[...]}` — **replaces the whole
+  group CLI**, so you must GET, modify, POST back or you corrupt the config.
+
+`_merge_cli(existing, submitted)` splices each top-level block of the submitted
+CLI (`_cli_blocks`) into the group's live config — a block whose header line
+matches is replaced in place (`_cli_replace_block`), anything else is left alone,
+new blocks are appended.
+
+`POST /api/config/classic/cli` `{cli, groups[], preview}`: for each group it GETs
+the live CLI, merges, and either returns the merged text (`preview:true`) or POSTs
+it. The UI has "Configure SSID" and "Create RADIUS server" cards that seed a CLI
+template (`wlan ssid-profile` + `wlan access-rule`; `wlan auth-server`), an
+editable textarea, a group multi-select, **Preview merge** (shows the exact text
+per group) and **Deploy** (confirm-gated). `GET /api/config/classic/cli/{group}`
+returns one group's current CLI.
+
+Not yet run against a live token — the `ap_cli` GET/POST paths are from the
+DevHub (`apiap_clisupdate_configuration_clis`) but unverified on this tenant.
