@@ -2025,7 +2025,7 @@ RADIUS_TEMPLATE = (
     "  acctport 1813\n"
     "  rfc3576\n"
     "  cppm-rfc3576-port 5999\n"
-    "  rfc5997 auth-acct\n"
+    "  rfc5997\n"
 )
 
 

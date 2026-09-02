@@ -268,3 +268,10 @@ returns one group's current CLI.
 as `********` and round-trip fine. `_merge_cli` verified against a real 122-line
 group config (splice appends new blocks, replaces same-header ones). The **POST**
 is not exercised (it is a live config write).
+
+**RADIUS "Query server status" (RFC 5997) CLI syntax** (verified against live
+production `wlan auth-server` blocks 2026-09-02): both Authentication + Accounting
+status checks = bare `rfc5997` (no argument); accounting only = `rfc5997
+acct-only`; auth only = `rfc5997 auth-only`. `rfc5997 auth-acct` is **invalid** —
+AOS silently drops the line and Central shows both boxes unchecked. Fixed in
+`rformToCli()` / `fillRformFromCli()` / `RADIUS_TEMPLATE`.
