@@ -1000,7 +1000,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
         "gateways": None, "sites": None, "subscriptions": None,
-        "apGroups": None, "ssids": None,
+        "apGroups": None, "ssids": None, "rfProfiles": None,
     }
     probes = {
         "accessPoints": "/monitoring/v2/aps",
@@ -1046,6 +1046,11 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     try:
         smap = await _classic_ssid_map(host, token)
         out["ssids"] = len(smap) if smap else None
+    except Exception:
+        pass
+    try:
+        rp = await _classic_rf_profiles(host, token)
+        out["rfProfiles"] = len(rp) if rp else None
     except Exception:
         pass
     return out
@@ -1179,6 +1184,16 @@ async def _classic_central_list(host: str, token: str, entity: str
                 c = dc.get(n, {"aps": 0, "switches": 0, "gateways": 0})
                 rows.append({"name": n, "aps": c["aps"], "switches": c["switches"],
                              "gateways": c["gateways"]})
+        elif entity == "rf-profiles":
+            rp = await _classic_rf_profiles(host, token)
+            if not rp:
+                return None, 0
+            rows = [
+                {"name": nm,
+                 "bands": ", ".join(sorted(e["types"], key=lambda b: _BAND_ORDER.get(b, 9))),
+                 "groups": ", ".join(sorted(e["groups"])) or "—"}
+                for nm, e in sorted(rp.items(), key=lambda x: x[0].lower())
+            ]
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -1365,8 +1380,10 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
         names, _sc = await _classic_group_names(client, host, headers)
         sem = asyncio.Semaphore(5)   # config API rate-limits hard under a burst
 
-        async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]]]:
+        async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
           async with sem:
+            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g)
+            cfg = _cli_ssid_cfg(clis)
             for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
                          f"/configuration/v2/wlan/{quote(g, safe='')}"):
                 r = await _retry_get(client, f"https://{host}{path}", headers)
@@ -1384,10 +1401,10 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
                             res.append((nm,
                                         _pick(w, "opmode", "security", "key_management", default=""),
                                         _pick(w, "type", "access_type", default="")))
-                return g, res
-            return g, []
+                return g, res, cfg
+            return g, [], cfg
 
-        for g, res in await asyncio.gather(*[_grp(n) for n in (names or [])]):
+        for g, res, cfg in await asyncio.gather(*[_grp(n) for n in (names or [])]):
             for nm, sec, typ in res:
                 e = out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
                 e["groups"].add(g)
@@ -1395,6 +1412,12 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
                     e["security"] = sec
                 if typ and not e["type"]:
                     e["type"] = typ
+            for nm, c in cfg.items():
+                e = out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
+                if c.get("bands"):
+                    e.setdefault("cfgBands", set()).update(c["bands"])
+                if c.get("vlan") and not e.get("cfgVlan"):
+                    e["cfgVlan"] = c["vlan"]
 
         for path in ("/monitoring/v2/networks", "/monitoring/v1/networks"):
             raw, _t, sc = await _fetch_all(
@@ -1432,7 +1455,7 @@ _BAND_ORDER = {"2.4 GHz": 0, "5 GHz": 1, "6 GHz": 2}
 
 def _ssid_row(name: str, e: dict[str, Any]) -> dict[str, Any]:
     m = e.get("mon") or {}
-    bands = e.get("bands")
+    bands = e.get("bands") or e.get("cfgBands")
     vlans = e.get("vlans")
     live = e.get("clientCount")
     mon_ct = _pick(m, "client_count", "num_clients", "clients", "associated_client_count")
@@ -1443,7 +1466,8 @@ def _ssid_row(name: str, e: dict[str, Any]) -> dict[str, Any]:
         "securityLevel": e.get("type") or _pick(m, "type", "wlan_type", default="—"),
         "band": ", ".join(sorted(bands, key=lambda b: _BAND_ORDER.get(b, 9))) if bands
                 else _pick(m, "band", default="—"),
-        "vlan": ", ".join(sorted(vlans)) if vlans else str(_pick(m, "vlan", "vlan_id", default="—")),
+        "vlan": ", ".join(sorted(vlans)) if vlans
+                else str(_pick(m, "vlan", "vlan_id", default=None) or e.get("cfgVlan") or "—"),
         "clients": live if live is not None else mon_ct,
         "groups": ", ".join(sorted(e.get("groups", []))) or "—",
     }
@@ -1808,6 +1832,7 @@ OVERVIEW_GROUPS = {
     "subscriptions": ["subscriptions"],
     "ssids": ["ssids"],
     "apGroups": ["apGroups"],
+    "rfProfiles": ["rfProfiles"],
 }
 
 
@@ -1829,6 +1854,8 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
                 return {"ssids": await _get_total(cx, f"https://{host}/network-monitoring/v1/wlans", hdr, {"limit": "1"})}
             if group == "apGroups":
                 return {"apGroups": None}
+            if group == "rfProfiles":
+                return {"rfProfiles": None}
         else:  # classic
             if group == "clients":
                 tot = 0
@@ -1857,9 +1884,12 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "apGroups":
                 names, _sc = await _classic_group_names(cx, host, hdr)
                 return {"apGroups": len(names) if names is not None else None}
-    if group == "ssids" and flavor == "classic":
+    if flavor == "classic" and group == "ssids":
         smap = await _classic_ssid_map(host, token)
         return {"ssids": len(smap) if smap else None}
+    if flavor == "classic" and group == "rfProfiles":
+        rp = await _classic_rf_profiles(host, token)
+        return {"rfProfiles": len(rp) if rp is not None else None}
     return {}
 
 
@@ -1880,7 +1910,7 @@ async def overview_group(flavor: str, group: str, request: Request) -> JSONRespo
 @app.get("/api/list/{flavor}/{entity}")
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
-                      "subscriptions", "ap-groups", "ssids"}:
+                      "subscriptions", "ap-groups", "ssids", "rf-profiles"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2002,6 +2032,106 @@ def _merge_cli(existing: list[str], submitted: list[str]) -> list[str]:
     for block in _cli_blocks(submitted):
         merged = _cli_replace_block(merged, block[0].strip(), block)
     return merged
+
+
+def _unquote(s: str) -> str:
+    s = (s or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        return s[1:-1]
+    return s
+
+
+_RF_BAND_TOKEN = {
+    "2.4": "2.4 GHz", "2.4ghz": "2.4 GHz", "g": "2.4 GHz",
+    "5": "5 GHz", "5.0": "5 GHz", "5ghz": "5 GHz", "a": "5 GHz",
+    "6": "6 GHz", "6.0": "6 GHz", "6ghz": "6 GHz",
+}
+
+
+def _cli_ssid_cfg(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
+    """Parse `wlan ssid-profile` blocks -> {name/essid: {bands:set, vlan:str}}."""
+    out: dict[str, dict[str, Any]] = {}
+    for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
+        head = blk[0].strip()
+        if not head.startswith("wlan ssid-profile "):
+            continue
+        prof_name = _unquote(head[len("wlan ssid-profile "):])
+        names: set[str] = set()
+        bands: set[str] = set()
+        vlan = ""
+        for ln in blk[1:]:
+            t = ln.strip()
+            if t.startswith("essid "):
+                names.add(_unquote(t[6:]))
+            elif t.startswith(("rf-band ", "allowed-band ", "wifi-band ")):
+                v = t.split(None, 1)[1].strip().lower()
+                if v in ("all", "all-bands"):
+                    bands |= {"2.4 GHz", "5 GHz", "6 GHz"}
+                elif v in _RF_BAND_TOKEN:
+                    bands.add(_RF_BAND_TOKEN[v])
+            elif t.startswith("vlan ") and not vlan:
+                vlan = _unquote(t[5:])
+        if not names:
+            names = {prof_name}
+        for nm in names:
+            if not nm:
+                continue
+            e = out.setdefault(nm, {"bands": set(), "vlan": ""})
+            e["bands"] |= bands
+            if vlan and not e["vlan"]:
+                e["vlan"] = vlan
+    return out
+
+
+_RF_PROFILE_KIND = {
+    "dot11a-radio-profile": "5 GHz",
+    "dot11g-radio-profile": "2.4 GHz",
+    "dot11-6ghz-radio-profile": "6 GHz",
+    "dot11-6GHz-radio-profile": "6 GHz",
+    "arm-profile": "ARM",
+    "am-scan-profile": "AM scan",
+    "spectrum-profile": "Spectrum",
+}
+
+
+def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, set[str]]:
+    """Named `rf <kind>-radio-profile "<name>"` blocks -> {name: {radio labels}}."""
+    out: dict[str, set[str]] = {}
+    for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
+        head = blk[0].strip()
+        if not head.startswith("rf "):
+            continue
+        parts = head[3:].split(None, 1)
+        if len(parts) != 2:
+            continue
+        label = _RF_PROFILE_KIND.get(parts[0])
+        name = _unquote(parts[1])
+        if label and name:
+            out.setdefault(name, set()).add(label)
+    return out
+
+
+async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict[str, Any]]]:
+    """RF profile names across every AP group -> {name: {types:set, groups:set}}."""
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    out: dict[str, dict[str, Any]] = {}
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        names, _sc = await _classic_group_names(client, host, headers)
+        if names is None:
+            return None
+        sem = asyncio.Semaphore(5)
+
+        async def _grp(g: str) -> tuple[str, dict[str, set[str]]]:
+            async with sem:
+                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g)
+                return g, _cli_rf_profiles(clis)
+
+        for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
+            for nm, labels in prof.items():
+                e = out.setdefault(nm, {"types": set(), "groups": set()})
+                e["types"] |= labels
+                e["groups"].add(g)
+    return out
 
 
 SSID_TEMPLATE = (
