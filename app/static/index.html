@@ -1301,7 +1301,7 @@
         n = n || "radius-1";
         return "wlan auth-server " + n +
           "\n  ip 10.0.0.20\n  key CHANGE_ME_SECRET\n  port 1812\n  acctport 1813" +
-          "\n  rfc3576\n  cppm-rfc3576-port 5999\n  rfc5997 auth-acct\n";
+          "\n  rfc3576\n  cppm-rfc3576-port 5999\n  rfc5997\n";
       }
     }
   };
@@ -1341,7 +1341,7 @@
       var cp = rf("coaport").value.trim(); if (cp) L.push("  cppm-rfc3576-port " + cp);
     }
     var qa = rf("q-auth").checked, qc = rf("q-acct").checked;
-    if (qa && qc) L.push("  rfc5997 auth-acct");
+    if (qa && qc) L.push("  rfc5997");
     else if (qa) L.push("  rfc5997 auth-only");
     else if (qc) L.push("  rfc5997 acct-only");
     if (rf("radsec").checked) L.push("  radsec");
@@ -1354,6 +1354,7 @@
   }
   function fillRformFromCli(txt) {
     rformDefaults();
+    rf("q-auth").checked = false; rf("q-acct").checked = false;
     var m;
     txt.split("\n").forEach(function (line) {
       var l = line.trim();
@@ -1364,6 +1365,7 @@
       else if ((m = l.match(/^acctport (\d+)$/))) rf("acct").value = m[1];
       else if (l === "rfc3576") rf("dynauth").checked = true;
       else if ((m = l.match(/^(?:cppm-)?rfc3576-port (\d+)$/))) rf("coaport").value = m[1];
+      else if (l === "rfc5997") { rf("q-auth").checked = true; rf("q-acct").checked = true; }
       else if ((m = l.match(/^rfc5997 (auth-only|acct-only|auth-acct)$/))) {
         rf("q-auth").checked = m[1] !== "acct-only"; rf("q-acct").checked = m[1] !== "auth-only";
       } else if (l === "radsec") rf("radsec").checked = true;
