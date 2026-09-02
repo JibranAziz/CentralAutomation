@@ -1947,8 +1947,10 @@ async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], gro
             continue
         if r.status_code != 200:
             return None, r.status_code, (r.text or "")[:300]
-        body = r.json() if r.content else {}
-        return list(body.get("clis") or body.get("data") or []), 200, ""
+        body = r.json() if r.content else []
+        if isinstance(body, list):
+            return [str(x) for x in body], 200, ""
+        return [str(x) for x in (body.get("clis") or body.get("data") or [])], 200, ""
     return None, 404, "ap_cli endpoint not found"
 
 
