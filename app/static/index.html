@@ -323,8 +323,9 @@
   .cload select {
     font-family: var(--sans); font-size: 12px; padding: 5px 8px;
     border: 1px solid var(--border-strong); border-radius: 7px;
-    background: var(--surface); color: var(--ink); max-width: 200px;
+    background: var(--surface); color: var(--ink); max-width: 190px;
   }
+  .cload select:disabled { opacity: .55; }
   .cload .cload-note { color: var(--faint); flex-basis: 100%; }
   .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent-line); }
   .btn.ghost:hover { background: var(--accent-wash); filter: none; }
@@ -901,8 +902,9 @@
         <div class="cload">
           <button class="linkbtn" type="button" id="cf-reset-tpl">Reset to template</button>
           <span class="cload-sep">·</span>
-          <span>Load existing from</span>
+          <span>Load from</span>
           <select id="cf-load-group"><option value="">group…</option></select>
+          <select id="cf-load-name" disabled><option value="">— select group —</option></select>
           <button class="linkbtn" type="button" id="cf-load">Load</button>
           <span class="cload-note" id="cf-load-note"></span>
         </div>
@@ -1273,6 +1275,8 @@
     detailEl.hidden = true;
     cgroupList.innerHTML = '<p class="cgroup-count">Loading AP groups…</p>';
     document.getElementById("cf-load-note").textContent = "";
+    document.getElementById("cf-load-name").innerHTML = '<option value="">— select group —</option>';
+    document.getElementById("cf-load-name").disabled = true;
     api("/api/config/" + activeFlavor + "/groups").then(function (res) {
       cfgGroups = (res.ok && res.body.groups) || [];
       renderGroupList("");
@@ -1284,12 +1288,42 @@
       });
     });
   }
-  function blockHeaders() {
-    var n = nameEl.value.trim();
+  function blockPrefix() {
+    return cfgKind === "ssid" ? "wlan ssid-profile" : "wlan auth-server";
+  }
+  function blockHeaders(name) {
+    var n = (name || nameEl.value).trim();
     if (!n) return [];
     return cfgKind === "ssid"
       ? ["wlan ssid-profile " + n, "wlan access-rule " + n]
       : ["wlan auth-server " + n];
+  }
+  function loadNamesForGroup(g) {
+    var nameSel = document.getElementById("cf-load-name");
+    var note = document.getElementById("cf-load-note");
+    nameSel.innerHTML = '<option value="">loading…</option>';
+    nameSel.disabled = true;
+    note.textContent = "";
+    if (!g) { nameSel.innerHTML = '<option value="">— select group —</option>'; return; }
+    api("/api/config/" + activeFlavor + "/cli/" + encodeURIComponent(g) +
+        "?names=" + encodeURIComponent(blockPrefix())).then(function (res) {
+      var list = (res.ok && res.body.names) || [];
+      nameSel.innerHTML = "";
+      if (!list.length) {
+        nameSel.innerHTML = '<option value="">none in ' + g + '</option>';
+        return;
+      }
+      var ph = document.createElement("option");
+      ph.value = ""; ph.textContent = (cfgKind === "ssid" ? "SSID…" : "server…");
+      nameSel.appendChild(ph);
+      list.forEach(function (n) {
+        var o = document.createElement("option"); o.value = n; o.textContent = n;
+        nameSel.appendChild(o);
+      });
+      nameSel.disabled = false;
+    }).catch(function () {
+      nameSel.innerHTML = '<option value="">read failed</option>';
+    });
   }
   function closeConfig() {
     configForm.hidden = true;
@@ -1318,20 +1352,25 @@
   });
   document.getElementById("config-back").addEventListener("click", closeConfig);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
+  document.getElementById("cf-load-group").addEventListener("change", function () {
+    loadNamesForGroup(this.value);
+  });
   document.getElementById("cf-load").addEventListener("click", function () {
     var note = document.getElementById("cf-load-note");
     var g = document.getElementById("cf-load-group").value;
-    var headers = blockHeaders();
+    var picked = document.getElementById("cf-load-name").value;
     if (!g) { note.textContent = "Pick a group."; return; }
-    if (!headers.length) { note.textContent = "Enter the " + CFG_META[cfgKind].nameLabel.toLowerCase() + " first."; return; }
+    if (!picked) { note.textContent = "Pick a " + (cfgKind === "ssid" ? "SSID" : "server") + " from the list."; return; }
+    var headers = blockHeaders(picked);
     note.textContent = "Loading…";
     api("/api/config/" + activeFlavor + "/cli/" + encodeURIComponent(g) +
         "?block=" + encodeURIComponent(headers.join("||"))).then(function (res) {
       if (!res.ok) { note.textContent = (res.body && res.body.error) || "Read failed."; return; }
-      if (!res.body.cli) { note.textContent = "Not found in " + g + "."; return; }
+      if (!res.body.cli) { note.textContent = '"' + picked + '" not found in ' + g + "."; return; }
+      nameEl.value = picked;
       cliEl.value = res.body.cli.replace(/\s+$/, "") + "\n";
       cliTouched = true;
-      note.textContent = "Loaded from " + g + " — secrets show as ******** (replace before deploying).";
+      note.textContent = "Loaded " + picked + " from " + g + " — secrets show as ******** (replace before deploying).";
     }).catch(function () { note.textContent = "Network error."; });
   });
   cliEl.addEventListener("input", function () { cliTouched = true; });
