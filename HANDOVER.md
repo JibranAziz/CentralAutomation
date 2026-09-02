@@ -139,14 +139,9 @@ verified live (7); Classic SSID path analogous, not re-verified.
     `/configuration/v1/wlan/{group}/{ssid}` → `{wlan:{essid,type,vlan,hide_ssid,
     wpa_passphrase,captive_profile_name,zone,access_rules,...}}`. Verified: 40
     SSIDs across 27 groups.
-  - **Configuration writes** (`/api/config/classic/*`, Classic only): `GET
-    .../groups` feeds the group multi-select; `POST .../ssid` →
-    `POST /configuration/v2/wlan/{group}/{ssid}` per group with `{essid, type
-    (employee|guest), vlan, hide_ssid[, wpa_passphrase, wpa_passphrase_changed]}`
-    — endpoint confirmed by the GET + docs, **the write itself is untested**.
-    `POST .../radius` → `POST /configuration/v2/radius_servers/{group}/{name}` is
-    a **guess** — every RADIUS-server path probed returned 404; the real endpoint
-    is still unknown.
+  - **Configuration writes** — see the "CLI-based configuration push" section
+    below (the structured `/configuration/v2/wlan` approach was dropped because it
+    can't express dot1x/RADIUS).
   - **topology**: `GET /topology_external_api/{site_id}` (int id) →
     `{devices, edges(fromIf/toIf), tunnels, rootNodes}`; `role` ∈
     IAP/Switch/Controller/VPNC/SECURITYCLOUD → node type; `rootNodes` → `roots`,
