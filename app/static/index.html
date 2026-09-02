@@ -306,6 +306,24 @@
     border-radius: 9px; padding: 10px 12px;
   }
   #config-form input[data-mono] { font-family: var(--mono); font-size: 12.5px; }
+  #config-form textarea {
+    width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.55;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 9px; padding: 10px 12px; resize: vertical; tab-size: 2;
+  }
+  #config-form .hint code {
+    font-family: var(--mono); background: var(--surface-2);
+    padding: 1px 4px; border-radius: 4px;
+  }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent-line); }
+  .btn.ghost:hover { background: var(--accent-wash); filter: none; }
+  #config-form .actions { gap: 10px; }
+  .cli-preview {
+    margin: 4px 0 8px; padding: 10px 12px; max-height: 280px; overflow: auto;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+    font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--muted);
+    white-space: pre;
+  }
   .cgroups { margin-top: 18px; }
   .cgroup-tools { display: flex; gap: 10px; align-items: center; margin: 8px 0; }
   .cgroup-tools input { flex: 1; }
@@ -858,35 +876,21 @@
           <span class="panel-head" id="config-form-title" style="margin:0">Configure SSID</span>
         </div>
 
-        <div class="cform" id="cform-ssid" hidden>
-          <div class="field"><label class="lbl" for="cf-ssid">SSID name <span class="req">*</span></label>
-            <input type="text" id="cf-ssid" autocomplete="off" placeholder="Corp-WiFi"></div>
-          <div class="field"><label class="lbl" for="cf-type">Type</label>
-            <select id="cf-type"><option value="employee">Employee (passphrase)</option><option value="guest">Guest (open)</option></select></div>
-          <div class="field" id="cf-pass-field"><label class="lbl" for="cf-pass">Passphrase <span class="req">*</span></label>
-            <div class="secret"><input type="password" id="cf-pass" autocomplete="new-password" placeholder="at least 8 characters">
-              <button type="button" class="reveal" data-reveal="cf-pass" aria-label="Show passphrase"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
-          <div class="field"><label class="lbl" for="cf-vlan">VLAN</label>
-            <input type="text" id="cf-vlan" value="1" data-mono></div>
-          <label class="chk"><input type="checkbox" id="cf-hide"> Hidden SSID</label>
+        <div class="field">
+          <label class="lbl" for="cf-name" id="cf-name-label">SSID name <span class="req">*</span></label>
+          <input type="text" id="cf-name" autocomplete="off">
         </div>
-
-        <div class="cform" id="cform-radius" hidden>
-          <div class="field"><label class="lbl" for="rf-name">Server name <span class="req">*</span></label>
-            <input type="text" id="rf-name" autocomplete="off" placeholder="clearpass-1"></div>
-          <div class="field"><label class="lbl" for="rf-ip">IP address <span class="req">*</span></label>
-            <input type="text" id="rf-ip" data-mono placeholder="10.0.0.20"></div>
-          <div class="field"><label class="lbl" for="rf-secret">Shared secret <span class="req">*</span></label>
-            <div class="secret"><input type="password" id="rf-secret" autocomplete="new-password">
-              <button type="button" class="reveal" data-reveal="rf-secret" aria-label="Show secret"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="rf-auth">Auth port</label><input type="text" id="rf-auth" value="1812" data-mono></div>
-            <div class="field"><label class="lbl" for="rf-acct">Acct port</label><input type="text" id="rf-acct" value="1813" data-mono></div>
-          </div>
+        <div class="field">
+          <label class="lbl" for="cf-cli">CLI configuration <span class="req">*</span></label>
+          <textarea id="cf-cli" rows="13" spellcheck="false" wrap="off"></textarea>
+          <div class="hint">AOS-8 / Instant CLI. Indent sub-commands two spaces. Each top-level block
+            (e.g. <code>wlan ssid-profile …</code>) is spliced into every selected group's live config —
+            a block with the same header is replaced, everything else is untouched.</div>
         </div>
+        <button class="linkbtn" type="button" id="cf-reset-tpl">Reset to template</button>
 
         <div class="cgroups">
-          <div class="lbl">Apply to AP groups <span class="req">*</span></div>
+          <div class="lbl">Deploy to AP groups <span class="req">*</span></div>
           <div class="cgroup-tools">
             <input type="search" id="cgroup-search" placeholder="Filter groups…" autocomplete="off">
             <button class="linkbtn" type="button" id="cgroup-all">Select all</button>
@@ -898,7 +902,8 @@
         <div class="formerr" id="config-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="config-err-msg"></span></div>
 
         <div class="actions">
-          <button type="button" class="btn" id="config-apply">Apply</button>
+          <button type="button" class="btn ghost" id="config-preview">Preview merge</button>
+          <button type="button" class="btn" id="config-apply">Deploy</button>
         </div>
         <div id="config-results"></div>
       </div>
@@ -1194,25 +1199,55 @@
     loadOverview(true);
   });
 
-  /* ---- Configuration (Classic writes) ---- */
-  var cfgKind = null, cfgGroups = [];
+  /* ---- Configuration (Classic AP-CLI writes) ---- */
+  var cfgKind = null, cfgGroups = [], cliTouched = false;
   var overviewInner = document.getElementById("dash-overview");
   var configForm = document.getElementById("config-form");
   var cgroupList = document.getElementById("cgroup-list");
+  var cliEl = document.getElementById("cf-cli");
+  var nameEl = document.getElementById("cf-name");
+  var resultsEl = document.getElementById("config-results");
+
+  var CFG_META = {
+    ssid: {
+      title: "Configure SSID", nameLabel: "SSID name",
+      tpl: function (n) {
+        n = n || "New-SSID";
+        return "wlan ssid-profile " + n + "\n  essid " + n +
+          "\n  type employee\n  opmode wpa2-psk-aes\n  wpa-passphrase CHANGE_ME_1234" +
+          "\n  vlan 1\n  rf-band all\n  captive-portal disable\n  enable" +
+          "\nwlan access-rule " + n + "\n  rule any any match any any any permit\n";
+      }
+    },
+    radius: {
+      title: "Create RADIUS server", nameLabel: "Server name",
+      tpl: function (n) {
+        n = n || "radius-1";
+        return "wlan auth-server " + n +
+          "\n  ip 10.0.0.20\n  port 1812\n  acctport 1813\n  key CHANGE_ME_SECRET\n";
+      }
+    }
+  };
 
   function cfgErr(msg) {
     var box = document.getElementById("config-err");
     document.getElementById("config-err-msg").textContent = msg || "";
     box.classList.toggle("on", !!msg);
   }
+  function applyTemplate() {
+    var m = CFG_META[cfgKind];
+    cliEl.value = m.tpl(nameEl.value.trim());
+    cliTouched = false;
+  }
 
   function openConfig(kind) {
     cfgKind = kind;
-    document.getElementById("config-form-title").textContent =
-      kind === "ssid" ? "Configure SSID" : "Create RADIUS server";
-    document.getElementById("cform-ssid").hidden = kind !== "ssid";
-    document.getElementById("cform-radius").hidden = kind !== "radius";
-    document.getElementById("config-results").innerHTML = "";
+    var m = CFG_META[kind];
+    document.getElementById("config-form-title").textContent = m.title;
+    document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " ";
+    nameEl.value = "";
+    applyTemplate();
+    resultsEl.innerHTML = "";
     cfgErr("");
     overviewInner.hidden = true;
     configForm.hidden = false;
@@ -1232,17 +1267,12 @@
     var f = (filter || "").toLowerCase();
     var shown = cfgGroups.filter(function (g) { return g.toLowerCase().indexOf(f) !== -1; });
     cgroupList.innerHTML = "";
-    if (!shown.length) {
-      cgroupList.innerHTML = '<p class="cgroup-count">No groups.</p>';
-      return;
-    }
+    if (!shown.length) { cgroupList.innerHTML = '<p class="cgroup-count">No groups.</p>'; return; }
     shown.forEach(function (g) {
       var l = document.createElement("label");
       var cb = document.createElement("input");
       cb.type = "checkbox"; cb.value = g; cb.className = "cg";
-      var prev = cgroupList.querySelector('input[value="' + CSS.escape(g) + '"]');
-      l.appendChild(cb);
-      l.appendChild(document.createTextNode(g));
+      l.appendChild(cb); l.appendChild(document.createTextNode(g));
       cgroupList.appendChild(l);
     });
   }
@@ -1254,68 +1284,67 @@
     b.addEventListener("click", function () { openConfig(b.getAttribute("data-config")); });
   });
   document.getElementById("config-back").addEventListener("click", closeConfig);
-  document.getElementById("cgroup-search").addEventListener("input", function () {
-    renderGroupList(this.value);
-  });
+  document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
+  cliEl.addEventListener("input", function () { cliTouched = true; });
+  nameEl.addEventListener("input", function () { if (!cliTouched) applyTemplate(); });
+  document.getElementById("cgroup-search").addEventListener("input", function () { renderGroupList(this.value); });
   document.getElementById("cgroup-all").addEventListener("click", function () {
     cgroupList.querySelectorAll(".cg").forEach(function (c) { c.checked = true; });
   });
   document.getElementById("cgroup-none").addEventListener("click", function () {
     cgroupList.querySelectorAll(".cg").forEach(function (c) { c.checked = false; });
   });
-  document.getElementById("cf-type").addEventListener("change", function () {
-    document.getElementById("cf-pass-field").hidden = this.value !== "employee";
-  });
 
-  document.getElementById("config-apply").addEventListener("click", function () {
+  function runConfig(preview) {
     cfgErr("");
     var groups = selectedGroups();
-    if (!groups.length) { cfgErr("Select at least one AP group."); return; }
-    var payload, url, summary;
-    if (cfgKind === "ssid") {
-      var ssid = document.getElementById("cf-ssid").value.trim();
-      var type = document.getElementById("cf-type").value;
-      var pass = document.getElementById("cf-pass").value;
-      if (!ssid) { cfgErr("Enter an SSID name."); return; }
-      if (type === "employee" && pass.length < 8) { cfgErr("Passphrase must be at least 8 characters."); return; }
-      payload = { ssid: ssid, type: type, passphrase: pass,
-        vlan: document.getElementById("cf-vlan").value.trim() || "1",
-        hideSsid: document.getElementById("cf-hide").checked, groups: groups };
-      url = "/api/config/" + activeFlavor + "/ssid";
-      summary = 'Create SSID "' + ssid + '" in ' + groups.length + ' group(s)?';
-    } else {
-      var nm = document.getElementById("rf-name").value.trim();
-      var ip = document.getElementById("rf-ip").value.trim();
-      var sec = document.getElementById("rf-secret").value;
-      if (!nm || !ip || !sec) { cfgErr("Server name, IP and shared secret are required."); return; }
-      payload = { name: nm, ip: ip, secret: sec,
-        authPort: document.getElementById("rf-auth").value.trim() || "1812",
-        acctPort: document.getElementById("rf-acct").value.trim() || "1813", groups: groups };
-      url = "/api/config/" + activeFlavor + "/radius";
-      summary = 'Create RADIUS server "' + nm + '" in ' + groups.length + ' group(s)?';
+    var cli = cliEl.value.trim();
+    if (!cli) { cfgErr("The CLI configuration is empty."); return; }
+    if (/^\s/.test(cliEl.value.split("\n")[0] || " ")) {
+      cfgErr("The first line must be a top-level command (no leading spaces)."); return;
     }
-    if (!window.confirm(summary + "\n\nThis writes to your live Aruba Central configuration.")) return;
+    if (!groups.length) { cfgErr("Select at least one AP group."); return; }
+    if (!preview && !window.confirm(
+      "Deploy this configuration to " + groups.length + " group(s)?\n\n" +
+      "It is spliced into each group's live Aruba Central config. Preview the merge first if unsure.")) return;
 
-    var btn = document.getElementById("config-apply");
-    btn.disabled = true; btn.textContent = "Applying…";
-    document.getElementById("config-results").innerHTML = "";
-    api(url, { method: "POST", body: JSON.stringify(payload) }).then(function (res) {
-      var out = document.getElementById("config-results");
+    var pv = document.getElementById("config-preview");
+    var dp = document.getElementById("config-apply");
+    pv.disabled = dp.disabled = true;
+    (preview ? pv : dp).textContent = preview ? "Building…" : "Deploying…";
+    resultsEl.innerHTML = "";
+    api("/api/config/" + activeFlavor + "/cli", {
+      method: "POST",
+      body: JSON.stringify({ cli: cliEl.value, groups: groups, preview: preview })
+    }).then(function (res) {
       if (!res.ok) { cfgErr((res.body && res.body.error) || "Request failed."); return; }
       (res.body.results || []).forEach(function (r) {
         var row = document.createElement("div");
         row.className = "cres " + (r.ok ? "ok" : "bad");
         var dot = document.createElement("span"); dot.className = "cr-dot";
         var g = document.createElement("span"); g.className = "cr-grp"; g.textContent = r.group;
-        var m = document.createElement("span"); m.className = "cr-msg";
-        m.textContent = r.ok ? "applied" : ("failed (" + r.status + ") " + (r.error || "")).trim();
-        row.appendChild(dot); row.appendChild(g); row.appendChild(m);
-        out.appendChild(row);
+        var msg = document.createElement("span"); msg.className = "cr-msg";
+        msg.textContent = r.ok
+          ? (preview ? "+" + r.added + " lines" : "deployed")
+          : ("failed (" + r.status + ") " + (r.error || "")).trim();
+        row.appendChild(dot); row.appendChild(g); row.appendChild(msg);
+        resultsEl.appendChild(row);
+        if (preview && r.preview) {
+          var pre = document.createElement("pre");
+          pre.className = "cli-preview";
+          pre.textContent = r.preview;
+          resultsEl.appendChild(pre);
+        }
       });
-      overviewLoaded[activeFlavor] = false;
+      if (!preview) overviewLoaded[activeFlavor] = false;
     }).catch(function () { cfgErr("Network error."); })
-      .finally(function () { btn.disabled = false; btn.textContent = "Apply"; });
-  });
+      .finally(function () {
+        pv.disabled = dp.disabled = false;
+        pv.textContent = "Preview merge"; dp.textContent = "Deploy";
+      });
+  }
+  document.getElementById("config-preview").addEventListener("click", function () { runConfig(true); });
+  document.getElementById("config-apply").addEventListener("click", function () { runConfig(false); });
 
   /* ---- drill-down ---- */
   var DEV_COLS = [["name", "Name"], ["status", "Status"], ["ip", "IPv4"], ["model", "Model"],

@@ -1934,81 +1934,155 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"groups": sorted(names or [], key=str.lower)})
 
 
-async def _classic_push(host: str, token: str, method: str, path: str,
-                        body: Optional[dict[str, Any]]) -> tuple[bool, int, str]:
-    hdr = {"Authorization": f"Bearer {token}", "Content-Type": "application/json",
-           "Accept": "application/json"}
-    try:
-        async with httpx.AsyncClient(timeout=45.0) as cx:
-            r = await cx.request(method, f"https://{host}{path}", headers=hdr, json=body)
-        ok = 200 <= r.status_code < 300
-        msg = "" if ok else (r.text or "")[:300]
-        return ok, r.status_code, msg
-    except Exception as exc:  # pragma: no cover
-        return False, 0, str(exc)[:200]
+async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], group: str
+                      ) -> tuple[Optional[list[str]], int, str]:
+    """Read a group's full AP CLI config."""
+    for path in (f"/configuration/v1/ap_cli/{quote(group, safe='')}",
+                 f"/configuration/v2/ap_cli/{quote(group, safe='')}"):
+        try:
+            r = await cx.get(f"https://{host}{path}", headers=hdr)
+        except Exception as exc:
+            return None, 0, str(exc)[:200]
+        if r.status_code == 404:
+            continue
+        if r.status_code != 200:
+            return None, r.status_code, (r.text or "")[:300]
+        body = r.json() if r.content else {}
+        return list(body.get("clis") or body.get("data") or []), 200, ""
+    return None, 404, "ap_cli endpoint not found"
 
 
-@app.post("/api/config/{flavor}/ssid")
-async def config_ssid(flavor: str, request: Request) -> JSONResponse:
+def _cli_lines(text: str) -> list[str]:
+    out = []
+    for raw in (text or "").replace("\r\n", "\n").split("\n"):
+        ln = raw.rstrip()
+        if ln.strip():
+            out.append(ln)
+    return out
+
+
+def _cli_blocks(lines: list[str]) -> list[list[str]]:
+    blocks: list[list[str]] = []
+    cur: Optional[list[str]] = None
+    for ln in lines:
+        if ln and not ln[0].isspace():
+            if cur:
+                blocks.append(cur)
+            cur = [ln]
+        elif cur is not None:
+            cur.append(ln)
+    if cur:
+        blocks.append(cur)
+    return blocks
+
+
+def _cli_replace_block(existing: list[str], header: str, new_block: list[str]) -> list[str]:
+    out: list[str] = []
+    i, done = 0, False
+    while i < len(existing):
+        ln = existing[i]
+        if ln.strip() == header and not ln[:1].isspace():
+            i += 1
+            while i < len(existing) and existing[i][:1].isspace():
+                i += 1
+            if not done:
+                out.extend(new_block)
+                done = True
+            continue
+        out.append(ln)
+        i += 1
+    if not done:
+        out.extend(new_block)
+    return out
+
+
+def _merge_cli(existing: list[str], submitted: list[str]) -> list[str]:
+    merged = list(existing)
+    for block in _cli_blocks(submitted):
+        merged = _cli_replace_block(merged, block[0].strip(), block)
+    return merged
+
+
+SSID_TEMPLATE = (
+    "wlan ssid-profile {name}\n"
+    "  essid {name}\n"
+    "  type employee\n"
+    "  opmode wpa2-psk-aes\n"
+    "  wpa-passphrase CHANGE_ME_1234\n"
+    "  vlan 1\n"
+    "  rf-band all\n"
+    "  captive-portal disable\n"
+    "  enable\n"
+    "wlan access-rule {name}\n"
+    "  rule any any match any any any permit\n"
+)
+RADIUS_TEMPLATE = (
+    "wlan auth-server {name}\n"
+    "  ip {ip}\n"
+    "  port 1812\n"
+    "  acctport 1813\n"
+    "  key CHANGE_ME_SECRET\n"
+)
+
+
+@app.get("/api/config/{flavor}/cli/{group}")
+async def config_cli_get(flavor: str, group: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
     if flavor != "classic":
-        return _err(400, "SSID configuration is only available for Classic Central.")
-    b = await request.json()
-    ssid = (b.get("ssid") or "").strip()
-    groups = [g for g in (b.get("groups") or []) if g]
-    kind = (b.get("type") or "employee").strip().lower()
-    passphrase = b.get("passphrase") or ""
-    vlan = str(b.get("vlan") or "1").strip()
-    if not ssid or not groups:
-        return _err(400, "SSID name and at least one AP group are required.")
-    if kind not in ("employee", "guest"):
-        kind = "employee"
-    if kind == "employee" and len(passphrase) < 8:
-        return _err(400, "A passphrase of at least 8 characters is required for an employee SSID.")
-
-    wlan: dict[str, Any] = {"essid": ssid, "type": kind, "vlan": vlan,
-                            "hide_ssid": bool(b.get("hideSsid"))}
-    if kind == "employee":
-        wlan["wpa_passphrase"] = passphrase
-        wlan["wpa_passphrase_changed"] = True
-
-    results = []
-    for g in groups:
-        ok, sc, msg = await _classic_push(
-            conn["host"], conn["access_token"], "POST",
-            f"/configuration/v2/wlan/{quote(g, safe='')}/{quote(ssid, safe='')}", wlan)
-        results.append({"group": g, "ok": ok, "status": sc, "error": msg})
-    return JSONResponse({"results": results})
+        return _err(400, "CLI configuration is only available for Classic Central.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        clis, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, group)
+    if clis is None:
+        return _err(502, f"Could not read CLI for {group} ({sc}). {msg}")
+    return JSONResponse({"group": group, "cli": "\n".join(clis)})
 
 
-@app.post("/api/config/{flavor}/radius")
-async def config_radius(flavor: str, request: Request) -> JSONResponse:
+@app.post("/api/config/{flavor}/cli")
+async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
     if flavor != "classic":
-        return _err(400, "RADIUS configuration is only available for Classic Central.")
+        return _err(400, "CLI configuration is only available for Classic Central.")
     b = await request.json()
-    name = (b.get("name") or "").strip()
-    ip = (b.get("ip") or "").strip()
-    secret = b.get("secret") or ""
+    submitted = _cli_lines(b.get("cli") or "")
     groups = [g for g in (b.get("groups") or []) if g]
-    auth_port = str(b.get("authPort") or "1812").strip()
-    if not (name and ip and secret and groups):
-        return _err(400, "Server name, IP, shared secret and at least one AP group are required.")
+    preview = bool(b.get("preview"))
+    if not submitted:
+        return _err(400, "The configuration is empty.")
+    if not groups:
+        return _err(400, "Select at least one AP group.")
+    if not _cli_blocks(submitted):
+        return _err(400, "The configuration must start with a top-level command (no leading spaces).")
 
-    body = {"name": name, "ip_address": ip, "auth_port": auth_port,
-            "acct_port": str(b.get("acctPort") or "1813").strip(),
-            "shared_secret": secret, "shared_secret_changed": True}
+    hdr_json = {"Authorization": f"Bearer {conn['access_token']}",
+                "Content-Type": "application/json", "Accept": "application/json"}
     results = []
-    for g in groups:
-        ok, sc, msg = await _classic_push(
-            conn["host"], conn["access_token"], "POST",
-            f"/configuration/v2/radius_servers/{quote(g, safe='')}/{quote(name, safe='')}", body)
-        results.append({"group": g, "ok": ok, "status": sc, "error": msg})
-    return JSONResponse({"results": results})
+    async with httpx.AsyncClient(timeout=60.0) as cx:
+        for g in groups:
+            cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr_json, g)
+            if cur is None:
+                results.append({"group": g, "ok": False, "status": sc,
+                                "error": f"read failed: {msg}"})
+                continue
+            merged = _merge_cli(cur, submitted)
+            if preview:
+                results.append({"group": g, "ok": True, "status": 200,
+                                "preview": "\n".join(merged), "added": len(merged) - len(cur)})
+                continue
+            try:
+                r = await cx.post(
+                    f"https://{conn['host']}/configuration/v1/ap_cli/{quote(g, safe='')}",
+                    headers=hdr_json, json={"clis": merged})
+                ok = 200 <= r.status_code < 300
+                results.append({"group": g, "ok": ok, "status": r.status_code,
+                                "error": "" if ok else (r.text or "")[:300]})
+            except Exception as exc:
+                results.append({"group": g, "ok": False, "status": 0, "error": str(exc)[:200]})
+    return JSONResponse({"results": results, "preview": preview})
 
 
 @app.post("/api/refresh/{kind}")
