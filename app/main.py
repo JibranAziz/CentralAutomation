@@ -1939,10 +1939,9 @@ async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], gro
     """Read a group's full AP CLI config."""
     for path in (f"/configuration/v1/ap_cli/{quote(group, safe='')}",
                  f"/configuration/v2/ap_cli/{quote(group, safe='')}"):
-        try:
-            r = await cx.get(f"https://{host}{path}", headers=hdr)
-        except Exception as exc:
-            return None, 0, str(exc)[:200]
+        r = await _retry_get(cx, f"https://{host}{path}", hdr)
+        if r is None:
+            return None, 0, "request failed"
         if r.status_code == 404:
             continue
         if r.status_code != 200:
@@ -2024,11 +2023,30 @@ RADIUS_TEMPLATE = (
     "  port 1812\n"
     "  acctport 1813\n"
     "  key CHANGE_ME_SECRET\n"
+    "  rfc3576\n"
+    "  rfc3576-port 3799\n"
+    "  rfc5997 auth-acct\n"
 )
 
 
+def _cli_extract_block(lines: list[str], header: str) -> list[str]:
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if ln.strip() == header.strip() and not ln[:1].isspace():
+            out = [ln]
+            i += 1
+            while i < len(lines) and lines[i][:1].isspace():
+                out.append(lines[i])
+                i += 1
+            return out
+        i += 1
+    return []
+
+
 @app.get("/api/config/{flavor}/cli/{group}")
-async def config_cli_get(flavor: str, group: str, request: Request) -> JSONResponse:
+async def config_cli_get(flavor: str, group: str, request: Request,
+                         block: Optional[str] = None) -> JSONResponse:
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
@@ -2039,6 +2057,11 @@ async def config_cli_get(flavor: str, group: str, request: Request) -> JSONRespo
         clis, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, group)
     if clis is None:
         return _err(502, f"Could not read CLI for {group} ({sc}). {msg}")
+    if block:
+        picked: list[str] = []
+        for h in [x for x in block.split("||") if x.strip()]:
+            picked += _cli_extract_block(clis, h)
+        return JSONResponse({"group": group, "cli": "\n".join(picked), "found": bool(picked)})
     return JSONResponse({"group": group, "cli": "\n".join(clis)})
 
 
