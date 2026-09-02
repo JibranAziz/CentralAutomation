@@ -57,6 +57,27 @@ behind NAT. `arubademo.online` is a Route 53 hosted zone
 Server runs nginx 1.24 — use `listen 443 ssl http2;`, **not** the 1.25-only
 `http2 on;` directive.
 
+### Repo deploy assets vs. this box
+
+The repo ships a **self-signed** deploy path so anyone can install on any
+hostname/IP without DNS or a public CA:
+
+- `deploy/install.sh` — venv + deps, `gen-cert.sh`, renders
+  `aruba-central-automation.service` (`__USER__` / `__APP_DIR__` → `aruba-ca` /
+  `/opt/aruba-central-automation`) and `nginx.conf` (`__SERVER_NAME__`), starts
+  both.
+- `deploy/gen-cert.sh` — `openssl req -x509` into
+  `/etc/ssl/aruba-central-automation/{fullchain,privkey}.pem`, SAN per name/IP
+  arg, 10-year default. HSTS is intentionally left out of `deploy/nginx.conf`.
+
+**This box (`10.0.0.151`) is unchanged** and does not use those scripts — it
+keeps its hand-built vhost at
+`/etc/nginx/sites-available/centralautomation.arubademo.online` pointing at the
+Let's Encrypt paths above, code at `/home/jibran/apps/...`, service user
+`jibran`. To redeploy here: `tar czf - app | ssh jibran@10.0.0.151 'cd
+~/apps/aruba-central-automation && tar xzf -'` then
+`sudo systemctl restart aruba-central-automation` (sudo/su password ends `$$`).
+
 ## Deploy / update procedure
 
 From a working copy (currently `~/Documents/aruba-central-automation` on the dev

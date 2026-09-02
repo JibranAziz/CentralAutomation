@@ -43,14 +43,32 @@ python3 -m venv .venv
 # open http://127.0.0.1:8080
 ```
 
-## Deploy
+## Deploy (self-signed TLS, any host)
 
-See [HANDOVER.md](HANDOVER.md) for the full production setup (systemd + nginx +
-Let's Encrypt via Route 53 DNS-01). In short:
+For your own server, LAN box or VM — works with any hostname *or* bare IP, no
+DNS or public cert authority needed. On Debian/Ubuntu, from the repo root:
 
-- `app/main.py` runs under Uvicorn on `127.0.0.1:8080` as a systemd service
-  (`deploy/aruba-central-automation.service`).
-- nginx terminates TLS and proxies to it (`deploy/nginx-centralautomation.conf`).
+```bash
+sudo apt install -y python3-venv nginx openssl rsync
+sudo ./deploy/install.sh central.example.lan      # or an IP: sudo ./deploy/install.sh 192.168.1.50
+```
+
+This creates a venv, generates a self-signed cert (with a SAN for every
+name/IP you pass), installs the systemd service + nginx vhost and starts
+everything. Then open `https://<your-host>/` and accept the browser's
+self-signed warning once.
+
+- `deploy/gen-cert.sh` — (re)generate just the cert, e.g. after adding a host.
+- `app/main.py` runs under Uvicorn on `127.0.0.1:8080` (systemd service
+  `deploy/aruba-central-automation.service`); nginx terminates TLS and proxies
+  to it (`deploy/nginx.conf`).
+
+### Production with a real certificate
+
+To use a trusted cert instead, point `ssl_certificate` / `ssl_certificate_key`
+in the nginx vhost at your ACME (Let's Encrypt / certbot) paths. See
+[HANDOVER.md](HANDOVER.md) for the maintainer's setup (certbot + Route 53
+DNS-01 auto-renewal).
 
 ## API credentials
 
