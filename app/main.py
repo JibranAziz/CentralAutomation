@@ -2029,6 +2029,17 @@ RADIUS_TEMPLATE = (
 )
 
 
+def _cli_block_names(lines: list[str], prefix: str) -> list[str]:
+    p = prefix.strip() + " "
+    out: list[str] = []
+    for ln in lines:
+        if ln[:1] and not ln[:1].isspace() and ln.strip().startswith(p):
+            nm = ln.strip()[len(p):].strip()
+            if nm and nm not in out:
+                out.append(nm)
+    return sorted(out, key=str.lower)
+
+
 def _cli_extract_block(lines: list[str], header: str) -> list[str]:
     i = 0
     while i < len(lines):
@@ -2046,7 +2057,8 @@ def _cli_extract_block(lines: list[str], header: str) -> list[str]:
 
 @app.get("/api/config/{flavor}/cli/{group}")
 async def config_cli_get(flavor: str, group: str, request: Request,
-                         block: Optional[str] = None) -> JSONResponse:
+                         block: Optional[str] = None,
+                         names: Optional[str] = None) -> JSONResponse:
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
@@ -2057,6 +2069,8 @@ async def config_cli_get(flavor: str, group: str, request: Request,
         clis, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, group)
     if clis is None:
         return _err(502, f"Could not read CLI for {group} ({sc}). {msg}")
+    if names:
+        return JSONResponse({"group": group, "names": _cli_block_names(clis, names)})
     if block:
         picked: list[str] = []
         for h in [x for x in block.split("||") if x.strip()]:
