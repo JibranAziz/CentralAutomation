@@ -263,5 +263,8 @@ editable textarea, a group multi-select, **Preview merge** (shows the exact text
 per group) and **Deploy** (confirm-gated). `GET /api/config/classic/cli/{group}`
 returns one group's current CLI.
 
-Not yet run against a live token — the `ap_cli` GET/POST paths are from the
-DevHub (`apiap_clisupdate_configuration_clis`) but unverified on this tenant.
+`GET /configuration/v1/ap_cli/{group}` **verified live 2026-09-02** — returns a
+**bare JSON array** of CLI strings (not `{clis:[...]}`); masked secrets come back
+as `********` and round-trip fine. `_merge_cli` verified against a real 122-line
+group config (splice appends new blocks, replaces same-header ones). The **POST**
+is not exercised (it is a live config write).
