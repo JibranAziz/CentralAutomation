@@ -1244,8 +1244,8 @@
       tpl: function (n) {
         n = n || "radius-1";
         return "wlan auth-server " + n +
-          "\n  ip 10.0.0.20\n  port 1812\n  acctport 1813\n  key CHANGE_ME_SECRET" +
-          "\n  rfc3576\n  rfc3576-port 3799\n  rfc5997 auth-acct\n";
+          "\n  ip 10.0.0.20\n  key CHANGE_ME_SECRET\n  port 1812\n  acctport 1813" +
+          "\n  rfc3576\n  cppm-rfc3576-port 5999\n  rfc5997 auth-acct\n";
       }
     }
   };

@@ -2020,11 +2020,11 @@ SSID_TEMPLATE = (
 RADIUS_TEMPLATE = (
     "wlan auth-server {name}\n"
     "  ip {ip}\n"
+    "  key CHANGE_ME_SECRET\n"
     "  port 1812\n"
     "  acctport 1813\n"
-    "  key CHANGE_ME_SECRET\n"
     "  rfc3576\n"
-    "  rfc3576-port 3799\n"
+    "  cppm-rfc3576-port 5999\n"
     "  rfc5997 auth-acct\n"
 )
 
