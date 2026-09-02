@@ -315,6 +315,17 @@
     font-family: var(--mono); background: var(--surface-2);
     padding: 1px 4px; border-radius: 4px;
   }
+  .cload {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin: 6px 0 4px; font-size: 11.5px; color: var(--muted);
+  }
+  .cload .cload-sep { opacity: .4; }
+  .cload select {
+    font-family: var(--sans); font-size: 12px; padding: 5px 8px;
+    border: 1px solid var(--border-strong); border-radius: 7px;
+    background: var(--surface); color: var(--ink); max-width: 200px;
+  }
+  .cload .cload-note { color: var(--faint); flex-basis: 100%; }
   .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent-line); }
   .btn.ghost:hover { background: var(--accent-wash); filter: none; }
   #config-form .actions { gap: 10px; }
@@ -887,7 +898,14 @@
             (e.g. <code>wlan ssid-profile …</code>) is spliced into every selected group's live config —
             a block with the same header is replaced, everything else is untouched.</div>
         </div>
-        <button class="linkbtn" type="button" id="cf-reset-tpl">Reset to template</button>
+        <div class="cload">
+          <button class="linkbtn" type="button" id="cf-reset-tpl">Reset to template</button>
+          <span class="cload-sep">·</span>
+          <span>Load existing from</span>
+          <select id="cf-load-group"><option value="">group…</option></select>
+          <button class="linkbtn" type="button" id="cf-load">Load</button>
+          <span class="cload-note" id="cf-load-note"></span>
+        </div>
 
         <div class="cgroups">
           <div class="lbl">Deploy to AP groups <span class="req">*</span></div>
@@ -1224,7 +1242,8 @@
       tpl: function (n) {
         n = n || "radius-1";
         return "wlan auth-server " + n +
-          "\n  ip 10.0.0.20\n  port 1812\n  acctport 1813\n  key CHANGE_ME_SECRET\n";
+          "\n  ip 10.0.0.20\n  port 1812\n  acctport 1813\n  key CHANGE_ME_SECRET" +
+          "\n  rfc3576\n  rfc3576-port 3799\n  rfc5997 auth-acct\n";
       }
     }
   };
@@ -1253,10 +1272,24 @@
     configForm.hidden = false;
     detailEl.hidden = true;
     cgroupList.innerHTML = '<p class="cgroup-count">Loading AP groups…</p>';
+    document.getElementById("cf-load-note").textContent = "";
     api("/api/config/" + activeFlavor + "/groups").then(function (res) {
       cfgGroups = (res.ok && res.body.groups) || [];
       renderGroupList("");
+      var sel = document.getElementById("cf-load-group");
+      sel.innerHTML = '<option value="">group…</option>';
+      cfgGroups.forEach(function (g) {
+        var o = document.createElement("option"); o.value = g; o.textContent = g;
+        sel.appendChild(o);
+      });
     });
+  }
+  function blockHeaders() {
+    var n = nameEl.value.trim();
+    if (!n) return [];
+    return cfgKind === "ssid"
+      ? ["wlan ssid-profile " + n, "wlan access-rule " + n]
+      : ["wlan auth-server " + n];
   }
   function closeConfig() {
     configForm.hidden = true;
@@ -1285,6 +1318,22 @@
   });
   document.getElementById("config-back").addEventListener("click", closeConfig);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
+  document.getElementById("cf-load").addEventListener("click", function () {
+    var note = document.getElementById("cf-load-note");
+    var g = document.getElementById("cf-load-group").value;
+    var headers = blockHeaders();
+    if (!g) { note.textContent = "Pick a group."; return; }
+    if (!headers.length) { note.textContent = "Enter the " + CFG_META[cfgKind].nameLabel.toLowerCase() + " first."; return; }
+    note.textContent = "Loading…";
+    api("/api/config/" + activeFlavor + "/cli/" + encodeURIComponent(g) +
+        "?block=" + encodeURIComponent(headers.join("||"))).then(function (res) {
+      if (!res.ok) { note.textContent = (res.body && res.body.error) || "Read failed."; return; }
+      if (!res.body.cli) { note.textContent = "Not found in " + g + "."; return; }
+      cliEl.value = res.body.cli.replace(/\s+$/, "") + "\n";
+      cliTouched = true;
+      note.textContent = "Loaded from " + g + " — secrets show as ******** (replace before deploying).";
+    }).catch(function () { note.textContent = "Network error."; });
+  });
   cliEl.addEventListener("input", function () { cliTouched = true; });
   nameEl.addEventListener("input", function () { if (!cliTouched) applyTemplate(); });
   document.getElementById("cgroup-search").addEventListener("input", function () { renderGroupList(this.value); });
