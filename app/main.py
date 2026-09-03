@@ -1189,15 +1189,17 @@ async def _classic_central_list(host: str, token: str, entity: str
             rp = await _classic_rf_profiles(host, token)
             if rp is None:
                 return None, 0
-            rows = [
-                {"name": nm,
-                 "scope": "Named profile" if e["named"] else "Group default",
-                 "radios": ", ".join(sorted(e["radios"], key=lambda b: _RF_RADIO_ORDER.get(b, 9))) or "—",
-                 "txpower": e["settings"].get("Max TX power", "—"),
-                 "chwidth": e["settings"].get("Channel width", "—"),
-                 "groups": ", ".join(sorted(e["groups"])) or "—"}
-                for nm, e in sorted(rp.items(), key=lambda x: x[0].lower())
-            ]
+            rows = []
+            for nm, e in sorted(rp.items(), key=lambda x: x[0].lower()):
+                labels = sorted(e["bands"], key=lambda b: _RF_RADIO_ORDER.get(b, 9))
+                a = next((e["bands"][b] for b in ("5 GHz", "2.4 GHz", "6 GHz") if b in e["bands"]), {})
+                rows.append({
+                    "name": nm,
+                    "scope": "Named profile" if e["named"] else "Group default",
+                    "radios": ", ".join(labels) or "—",
+                    "txpower": _rf_power(a) or "—",
+                    "groups": ", ".join(sorted(e["groups"])) or "—",
+                })
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -1927,7 +1929,7 @@ async def list_entity(flavor: str, entity: str, request: Request) -> JSONRespons
 
 @app.get("/api/detail/{flavor}/{kind}/{ident}")
 async def detail(flavor: str, kind: str, ident: str, request: Request) -> JSONResponse:
-    if kind not in ("client", "device", "site", "group", "ssid"):
+    if kind not in ("client", "device", "site", "group", "ssid", "rf"):
         return _err(404, "Unknown detail type.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2104,13 +2106,21 @@ _RF_PROFILE_KIND = {
 _RF_RADIO_ORDER = {"2.4 GHz": 0, "5 GHz": 1, "5 GHz (secondary)": 2, "6 GHz": 3, "ARM": 4}
 
 
+_RF_FLAG_KEYS = ("spectrum-monitor", "smart-antenna", "channel-quality-aware",
+                 "very-high-throughput-disable", "high-throughput-disable")
+_RF_VAL_KEYS = ("max-tx-power", "min-tx-power", "max-distance",
+                "free-channel-index", "disable-arm-wids-functions",
+                "csa-count", "high-noise-backoff-time")
+
+
 def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
     """`rf <kind>-radio-profile ["<name>"]` blocks.
 
     AOS-10 config groups usually carry one *unnamed* radio profile per band
     (the group default); some deployments define named ones. Returns
-    ``{name_or_"": {"radios": {labels}, "settings": {k: v}}}`` — key ``""`` is
-    the group default.
+    ``{name_or_"": {"bands": {band_label: {setting: value}}}}`` — key ``""`` is
+    the group default. Flag lines store ``True``; ``ch-bw-range a b`` and
+    ``allowed-channels ...`` keep their raw argument.
     """
     out: dict[str, dict[str, Any]] = {}
     for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
@@ -2122,26 +2132,27 @@ def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
         if not label:
             continue
         name = _unquote(parts[1]) if len(parts) == 2 else ""
-        e = out.setdefault(name, {"radios": set(), "settings": {}})
-        e["radios"].add(label)
+        band = out.setdefault(name, {"bands": {}})["bands"].setdefault(label, {})
         for ln in blk[1:]:
             t = ln.strip()
-            if t.startswith("max-tx-power "):
-                e["settings"].setdefault("Max TX power", t.split(None, 1)[1])
-            elif t.startswith("min-tx-power "):
-                e["settings"].setdefault("Min TX power", t.split(None, 1)[1])
-            elif t.startswith("ch-bw-range "):
-                e["settings"].setdefault("Channel width", t.split(None, 1)[1])
+            if not t:
+                continue
+            kw = t.split(None, 1)[0]
+            arg = t.split(None, 1)[1] if " " in t else ""
+            if kw in _RF_FLAG_KEYS and not arg:
+                band[kw] = True
+            elif kw in ("ch-bw-range", "allowed-channels") or kw in _RF_VAL_KEYS:
+                band.setdefault(kw, arg or True)
     return out
 
 
 async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict[str, Any]]]:
     """RF profiles across every AP group.
 
-    -> ``{display_name: {"radios": set, "groups": set, "named": bool,
-    "settings": {k: v}}}``. Unnamed group-default radio configs are keyed by
-    their AP-group name (in the Classic config-group model the RF profile is
-    per group).
+    -> ``{display_name: {"bands": {label: {setting: value}}, "groups": set,
+    "named": bool}}``. Unnamed group-default radio configs are keyed by their
+    AP-group name (in the Classic config-group model the RF profile is per
+    group).
     """
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, dict[str, Any]] = {}
@@ -2159,13 +2170,87 @@ async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict
         for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
             for nm, info in prof.items():
                 key = nm or g
-                e = out.setdefault(key, {"radios": set(), "groups": set(),
-                                         "named": bool(nm), "settings": {}})
-                e["radios"] |= info["radios"]
+                e = out.setdefault(key, {"bands": {}, "groups": set(), "named": bool(nm)})
+                for label, settings in info["bands"].items():
+                    dst = e["bands"].setdefault(label, {})
+                    for k, v in settings.items():
+                        dst.setdefault(k, v)
                 e["groups"].add(g)
-                for k, v in info["settings"].items():
-                    e["settings"].setdefault(k, v)
     return out
+
+
+def _rf_power(s: dict[str, Any]) -> Optional[str]:
+    lo, hi = s.get("min-tx-power"), s.get("max-tx-power")
+    if lo and hi:
+        return f"{lo}–{hi} dBm"
+    if hi:
+        return f"up to {hi} dBm"
+    if lo:
+        return f"from {lo} dBm"
+    return None
+
+
+def _rf_width(s: dict[str, Any], band: str) -> Optional[str]:
+    raw = s.get("ch-bw-range")
+    if isinstance(raw, str) and raw:
+        w = [p.replace("MHz", " MHz").strip() for p in raw.split()]
+        return w[0] if len(w) == 1 or w[0] == w[-1] else f"{w[0]} – {w[-1]}"
+    if band == "2.4 GHz":
+        return "20 MHz"
+    return "Default"
+
+
+def _rf_band_group(label: str, s: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ch = s.get("allowed-channels")
+    src = {
+        "power": _rf_power(s),
+        "width": _rf_width(s, label),
+        "channels": ch if isinstance(ch, str) and ch else "Regulatory default",
+        "spectrum": "On" if s.get("spectrum-monitor") else None,
+        "smart": "On" if s.get("smart-antenna") else None,
+        "cqa": "On" if s.get("channel-quality-aware") else None,
+        "armwids": ("Disabled" if str(s.get("disable-arm-wids-functions")).lower()
+                    not in ("", "off", "none") else None),
+        "maxdist": s.get("max-distance") if s.get("max-distance") not in (None, "0") else None,
+        "csa": s.get("csa-count"),
+        "noise": (f"{s['high-noise-backoff-time']} min" if s.get("high-noise-backoff-time") else None),
+    }
+    return _kv_group(f"{label} radio", src, [
+        ("power", "Allowed transmit power"),
+        ("width", "Channel width"),
+        ("channels", "Allowed channels"),
+        ("spectrum", "Spectrum monitor"),
+        ("smart", "Smart antenna"),
+        ("cqa", "Channel quality aware"),
+        ("armwids", "ARM/WIDS functions"),
+        ("maxdist", "Max distance"),
+        ("csa", "CSA count"),
+        ("noise", "High-noise backoff"),
+    ])
+
+
+async def _classic_central_rf_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    rp = await _classic_rf_profiles(host, token)
+    e = (rp or {}).get(name)
+    if e is None:
+        return None
+    order = _RF_RADIO_ORDER
+    groups = [_rf_band_group(lbl, e["bands"][lbl])
+              for lbl in sorted(e["bands"], key=lambda b: order.get(b, 9))]
+    grp_list = ", ".join(sorted(e["groups"]))
+    groups = [g for g in groups if g]
+    groups.append({"label": "Applied to", "fields": [["AP groups", grp_list or "—"]]})
+    return {
+        "title": name,
+        "subtitle": "Named RF profile" if e["named"] else "Group-default RF profile",
+        "status": "",
+        "groups": groups,
+        "devices": [],
+        "meta": {"kind": "rf"},
+    }
+
+
+_DASH["classic"]["rf"] = _classic_central_rf_detail
 
 
 SSID_TEMPLATE = (

@@ -116,7 +116,7 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `GET /api/overview/{flavor}` | all card counts in one shot (legacy; UI no longer uses it) |
 | `GET /api/overview/{flavor}/{group}` | one metric group — `clients` \| `devices` \| `sites` \| `subscriptions` \| `ssids` \| `apGroups` \| `rfProfiles`; UI fires them all in parallel and fills each card as it resolves, with a progress-chip row. `apGroups` + `rfProfiles` are Classic-only (hidden for New via `NEW_ONLY_HIDE`) |
 | `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids, rf-profiles — normalized rows |
-| `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid) |
+| `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid\|rf}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid). `rf` = Classic RF-profile detail |
 | `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
 
 **Loading states** are animated everywhere by default: the overview cards use
@@ -180,10 +180,21 @@ verified live (7); Classic SSID path analogous, not re-verified.
     config-group model these blocks are almost always **unnamed** (one radio
     profile per band, the group default) — those are keyed by the AP-group name
     (`key = name or g`), so the RF profile *is* the group. Named profiles, where
-    present, are keyed by name and merged across groups. Rows: RF Profile / Scope
-    (Named profile · Group default) / Radios / Max TX / Ch. width / AP Groups; a
-    few settings (`max-tx-power`, `ch-bw-range`) are pulled from the block body.
-    No drill-down. Verified live 2026-09-02: 12 entries across 27 groups.
+    present, are keyed by name and merged across groups. `_cli_rf_profiles`
+    returns `{name: {"bands": {label: {setting: value}}}}` — flag lines
+    (`spectrum-monitor`, `smart-antenna`, `channel-quality-aware`) store `True`;
+    `ch-bw-range` / `allowed-channels` / `max-tx-power` / `min-tx-power` /
+    `max-distance` / `csa-count` / `high-noise-backoff-time` keep their arg.
+    List rows: RF Profile / Scope / Radios / TX power (5 GHz repr.) / AP Groups.
+    **Drill-down** (`kind: "rf"`, `_classic_central_rf_detail`, wired into
+    `_DASH` *after* its def since it lives below the dict literal): one
+    `_kv_group` per radio band (2.4 / 5 / 5-secondary / 6 GHz) with Allowed
+    transmit power (`_rf_power` min–max), Channel width (`_rf_width`; 2.4 GHz →
+    "20 MHz", absent elsewhere → "Default"), Allowed channels (raw list, or
+    "Regulatory default" when the CLI doesn't override it), plus the flags; then
+    an "Applied to" group listing the AP groups. Verified live 2026-09-02: 12
+    entries across 27 groups. Central's *default* channel lists / widths are not
+    in the AP-CLI, so we can only show explicit overrides.
   - **Configuration writes** — see the "CLI-based configuration push" section
     below (the structured `/configuration/v2/wlan` approach was dropped because it
     can't express dot1x/RADIUS).
