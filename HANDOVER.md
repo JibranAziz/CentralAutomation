@@ -119,6 +119,12 @@ curl -sk https://centralautomation.arubademo.online/healthz \
 | `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid) |
 | `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
 
+**Loading states** are animated everywhere by default: the overview cards use
+shimmer values + a per-API progress-chip row; drill-down lists render a
+`loadrow()` (spinner + sweeping-gradient text) plus 7 shimmer skeleton rows
+(`skeletonTable`); entity detail and topology show `loadrow()` + block
+skeletons. All honour `prefers-reduced-motion`.
+
 `flavor` ∈ `new` \| `classic`. SSIDs card is on both flavors (New:
 `/network-monitoring/v1/wlans`, Classic: `/monitoring/v{2,1}/networks`); its
 detail shows config + a member grid of the wireless clients on that SSID
@@ -165,13 +171,17 @@ verified live (7); Classic SSID path analogous, not re-verified.
     `{wlan:{essid,type,vlan,hide_ssid,wpa_passphrase,captive_profile_name,zone,
     access_rules,...}}`. Verified: 40 SSIDs across 27 groups.
   - **RF Profiles** (Classic-only card, like AP Groups): `_classic_rf_profiles`
-    fetches each group's AP-CLI (5-wide semaphore) and `_cli_rf_profiles` pulls
-    named `rf <kind>-radio-profile "<name>"` block headers (`dot11a` → 5 GHz,
-    `dot11g` → 2.4 GHz, `dot11-6ghz` → 6 GHz; unnamed singleton `rf arm-profile`
-    etc. are skipped). Card count = distinct profile names; list rows =
-    name / radios / the AP groups whose CLI defines them. No drill-down.
-    Overview part returns `0` (not `null`) when groups exist but define no named
-    profiles, so the card shows 0 rather than retrying.
+    fetches each group's AP-CLI (5-wide semaphore, `_ap_cli_get(..., tries=1)`
+    since gateway/switch groups deterministically 500 here) and `_cli_rf_profiles`
+    parses `rf <kind>-radio-profile` blocks: `dot11a` → 5 GHz, `dot11a-secondary`
+    → 5 GHz (secondary), `dot11g` → 2.4 GHz, `dot11-6ghz` → 6 GHz. In the AOS-10
+    config-group model these blocks are almost always **unnamed** (one radio
+    profile per band, the group default) — those are keyed by the AP-group name
+    (`key = name or g`), so the RF profile *is* the group. Named profiles, where
+    present, are keyed by name and merged across groups. Rows: RF Profile / Scope
+    (Named profile · Group default) / Radios / Max TX / Ch. width / AP Groups; a
+    few settings (`max-tx-power`, `ch-bw-range`) are pulled from the block body.
+    No drill-down. Verified live 2026-09-02: 12 entries across 27 groups.
   - **Configuration writes** — see the "CLI-based configuration push" section
     below (the structured `/configuration/v2/wlan` approach was dropped because it
     can't express dot1x/RADIUS).
