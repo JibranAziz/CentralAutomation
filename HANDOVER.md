@@ -171,8 +171,10 @@ verified live (7); Classic SSID path analogous, not re-verified.
     `{wlan:{essid,type,vlan,hide_ssid,wpa_passphrase,captive_profile_name,zone,
     access_rules,...}}`. Verified: 40 SSIDs across 27 groups.
   - **RF Profiles** (Classic-only card, like AP Groups): `_classic_rf_profiles`
-    fetches each group's AP-CLI (5-wide semaphore, `_ap_cli_get(..., tries=1)`
-    since gateway/switch groups deterministically 500 here) and `_cli_rf_profiles`
+    fetches each group's AP-CLI (5-wide semaphore, `_ap_cli_get(..., sweep=True)`
+    — still retries 429/502-504 three times so rate-limited groups aren't lost,
+    but skips retrying the deterministic 500 that gateway/switch groups return)
+    and `_cli_rf_profiles`
     parses `rf <kind>-radio-profile` blocks: `dot11a` → 5 GHz, `dot11a-secondary`
     → 5 GHz (secondary), `dot11g` → 2.4 GHz, `dot11-6ghz` → 6 GHz. In the AOS-10
     config-group model these blocks are almost always **unnamed** (one radio
