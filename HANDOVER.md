@@ -326,13 +326,31 @@ CLI (`_cli_blocks`) into the group's live config — a block whose header line
 matches is replaced in place (`_cli_replace_block`), anything else is left alone,
 new blocks are appended.
 
-`POST /api/config/classic/cli` `{cli, groups[], preview}`: for each group it GETs
-the live CLI, merges, and either returns the merged text (`preview:true`) or POSTs
-it. The UI has "Configure SSID" and "Create RADIUS server" cards that seed a CLI
-template (`wlan ssid-profile` + `wlan access-rule`; `wlan auth-server`), an
-editable textarea, a group multi-select, **Preview merge** (shows the exact text
-per group) and **Deploy** (confirm-gated). `GET /api/config/classic/cli/{group}`
-returns one group's current CLI.
+`_merge_cli_submerge(existing, submitted, managed)` is the **line-level** merge
+used by the RF-profile form: within a same-header block it replaces each child by
+leading keyword (`_kw`), keeps unmanaged children, and drops any keyword in
+`managed` that the submitted block omits (so the form's "Also remove options
+that aren't set" checkbox works). Blocks with no existing match are appended.
+
+`POST /api/config/classic/cli` `{cli, groups[], preview, submerge?, managed?}`:
+for each group it GETs the live CLI, merges (`submerge` → `_merge_cli_submerge`,
+else `_merge_cli`), and either returns the merged text (`preview:true`) or POSTs
+it (and `_ap_cli_cache_clear`s the group). The UI has three cards:
+- **Configure SSID** — seeds `wlan ssid-profile` + `wlan access-rule` into an
+  editable textarea.
+- **Create RADIUS server** — structured `#rform` → `wlan auth-server` block.
+- **Configure RF profile** — structured 3-column (2.4/5/6 GHz) `#rfp-form`
+  (`rfpToCli` / `fillRfpFromCli`). Emits `rf dot11g|dot11a|dot11-6ghz-radio-profile`
+  blocks with `allowed-channels`, `min/max-tx-power`, `ch-bw-range <w>MHz <w>MHz`,
+  `csa-count`, `high-noise-backoff-time`, `dot11h`, `spectrum-monitor`,
+  `channel-quality-aware`, `disable-arm-wids-functions`. Pushes with
+  `submerge:true`; `managed` only sent when the "remove unset options" box is
+  ticked. "Load from" pulls the group's three radio-profile blocks into the form.
+  These are the AOS-10 group-default (unnamed) radio profiles.
+
+All three share the group multi-select, **Preview merge** (exact per-group text)
+and confirm-gated **Deploy**. `GET /api/config/classic/cli/{group}` returns one
+group's current CLI (or just the `?block=a||b` blocks / `?names=` block names).
 
 `GET /configuration/v1/ap_cli/{group}` **verified live 2026-09-02** — returns a
 **bare JSON array** of CLI strings (not `{clis:[...]}`); masked secrets come back

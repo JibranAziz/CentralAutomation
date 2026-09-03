@@ -2079,6 +2079,53 @@ def _merge_cli(existing: list[str], submitted: list[str]) -> list[str]:
     return merged
 
 
+def _kw(line: str) -> str:
+    """The leading keyword of a CLI sub-line (everything up to the first space)."""
+    return line.strip().split(None, 1)[0] if line.strip() else ""
+
+
+def _merge_cli_submerge(existing: list[str], submitted: list[str],
+                        managed: list[str]) -> list[str]:
+    """Merge each submitted block into the same-header existing block
+    *line by line*: a submitted child replaces the existing child with the same
+    leading keyword, unmanaged existing children are kept, and any ``managed``
+    keyword absent from the submitted block is dropped (so unticking a field in
+    the form removes it). Blocks with no existing match are appended whole.
+    """
+    managed_set = set(managed)
+    out = list(existing)
+    for block in _cli_blocks(submitted):
+        header = block[0].strip()
+        sub_children = block[1:]
+        sub_kw = {_kw(c): c for c in sub_children}
+        # locate the existing block
+        start = next((i for i, ln in enumerate(out)
+                      if ln.strip() == header and not ln[:1].isspace()), None)
+        if start is None:
+            out.extend([block[0]] + sub_children)
+            continue
+        end = start + 1
+        while end < len(out) and out[end][:1].isspace():
+            end += 1
+        indent = "  "
+        kept: list[str] = []
+        seen: set[str] = set()
+        for ln in out[start + 1:end]:
+            k = _kw(ln)
+            if k in sub_kw:
+                kept.append(indent + sub_kw[k].strip())
+                seen.add(k)
+            elif k in managed_set:
+                continue  # managed + not submitted -> drop
+            else:
+                kept.append(ln)
+        for k, c in sub_kw.items():
+            if k not in seen:
+                kept.append(indent + c.strip())
+        out = out[:start + 1] + kept + out[end:]
+    return out
+
+
 def _unquote(s: str) -> str:
     s = (s or "").strip()
     if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
@@ -2379,6 +2426,8 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
     submitted = _cli_lines(b.get("cli") or "")
     groups = [g for g in (b.get("groups") or []) if g]
     preview = bool(b.get("preview"))
+    submerge = bool(b.get("submerge"))
+    managed = [str(k) for k in (b.get("managed") or [])]
     if not submitted:
         return _err(400, "The configuration is empty.")
     if not groups:
@@ -2396,7 +2445,8 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
                 results.append({"group": g, "ok": False, "status": sc,
                                 "error": f"read failed: {msg}"})
                 continue
-            merged = _merge_cli(cur, submitted)
+            merged = (_merge_cli_submerge(cur, submitted, managed) if submerge
+                      else _merge_cli(cur, submitted))
             if preview:
                 results.append({"group": g, "ok": True, "status": 200,
                                 "preview": "\n".join(merged), "added": len(merged) - len(cur)})
