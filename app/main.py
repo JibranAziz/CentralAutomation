@@ -1972,6 +1972,73 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"groups": sorted(names or [], key=str.lower)})
 
 
+_GROUP_DEV_TYPES = {"AccessPoints", "Gateways", "Switches"}
+_GROUP_SW_TYPES = {"AOS_S", "AOS_CX"}
+
+
+@app.post("/api/config/{flavor}/group")
+async def config_group_create(flavor: str, request: Request) -> JSONResponse:
+    """Create a new AP/config group (Classic). Groups are always created with
+    the AOS-8 / Instant architecture — Central's API does not allow choosing or
+    changing it, so an AOS-10 group must be made in the Central UI."""
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Group creation is only available for Classic Central.")
+    b = await request.json()
+    name = (b.get("name") or "").strip()
+    password = (b.get("password") or "").strip()
+    dev_types = [t for t in (b.get("devTypes") or []) if t in _GROUP_DEV_TYPES] or ["AccessPoints"]
+    sw_types = [t for t in (b.get("swTypes") or []) if t in _GROUP_SW_TYPES]
+    ap_role = b.get("apRole") if b.get("apRole") in ("Standard", "Microbranch") else "Standard"
+    if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
+        return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
+    if len(password) < 6:
+        return _err(400, "Group password must be at least 6 characters.")
+
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    base = f"https://{conn['host']}"
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        r = await cx.post(f"{base}/configuration/v1/groups", headers=hdr, json={
+            "group": name,
+            "group_attributes": {"template_group": False, "group_password": password},
+        })
+        if not (200 <= r.status_code < 300):
+            return _err(502, f"Central rejected the group ({r.status_code}): {(r.text or '')[:300]}")
+        props: dict[str, Any] = {"AllowedDevTypes": dev_types, "ApNetworkRole": ap_role}
+        if "Switches" in dev_types and sw_types:
+            props["AllowedSwitchTypes"] = sw_types
+        pr = await cx.patch(
+            f"{base}/configuration/v2/groups/{quote(name, safe='')}/properties",
+            headers=hdr, json={"properties": props})
+        props_ok = 200 <= pr.status_code < 300
+    _ap_cli_cache_clear(conn["host"])
+    return JSONResponse({
+        "ok": True, "name": name, "architecture": "Instant (AOS-8)",
+        "propertiesApplied": props_ok,
+        "note": "" if props_ok else f"group created; properties not applied ({pr.status_code})",
+    })
+
+
+@app.delete("/api/config/{flavor}/group/{name}")
+async def config_group_delete(flavor: str, name: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Group deletion is only available for Classic Central.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        r = await cx.delete(
+            f"https://{conn['host']}/configuration/v1/groups/{quote(name, safe='')}", headers=hdr)
+    if not (200 <= r.status_code < 300):
+        return _err(502, f"Central rejected the deletion ({r.status_code}): {(r.text or '')[:300]}")
+    _ap_cli_cache_clear(conn["host"])
+    return JSONResponse({"ok": True, "name": name})
+
+
 # Short-lived cache so the SSID and RF-profile sweeps (both hit ap_cli for
 # every group, and run concurrently during overview load) don't hammer the
 # rate-limity config API and lose groups to 429s. Keyed by (host, group).
