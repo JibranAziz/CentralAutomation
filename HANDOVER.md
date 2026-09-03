@@ -356,7 +356,9 @@ verified live 2026-09-03 with the probe endpoint):
 
 The Configuration section cards:
 - **Configure SSID** — seeds `wlan ssid-profile` + `wlan access-rule` into an
-  editable textarea.
+  editable textarea. Editing the name field after a Load renames the CLI
+  references (`renameCliRefs`: `wlan ssid-profile` / `wlan access-rule` /
+  `wlan mac-acl` / matching `essid`) on blur — so "load then rename" clones it.
 - **Create RADIUS server** — structured `#rform` → `wlan auth-server` block.
 - **Configure RF profile** — structured 3-column (2.4/5/6 GHz) `#rfp-form`
   (`rfpToCli` / `fillRfpFromCli`). Emits `rf dot11g|dot11a|dot11-6ghz-radio-profile`
