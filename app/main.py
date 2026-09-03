@@ -1186,11 +1186,14 @@ async def _classic_central_list(host: str, token: str, entity: str
                              "gateways": c["gateways"]})
         elif entity == "rf-profiles":
             rp = await _classic_rf_profiles(host, token)
-            if not rp:
+            if rp is None:
                 return None, 0
             rows = [
                 {"name": nm,
-                 "bands": ", ".join(sorted(e["types"], key=lambda b: _BAND_ORDER.get(b, 9))),
+                 "scope": "Named profile" if e["named"] else "Group default",
+                 "radios": ", ".join(sorted(e["radios"], key=lambda b: _RF_RADIO_ORDER.get(b, 9))) or "—",
+                 "txpower": e["settings"].get("Max TX power", "—"),
+                 "chwidth": e["settings"].get("Channel width", "—"),
                  "groups": ", ".join(sorted(e["groups"])) or "—"}
                 for nm, e in sorted(rp.items(), key=lambda x: x[0].lower())
             ]
@@ -1382,7 +1385,7 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
           async with sem:
-            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g)
+            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, tries=1)
             cfg = _cli_ssid_cfg(clis)
             for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
                          f"/configuration/v2/wlan/{quote(g, safe='')}"):
@@ -1964,12 +1967,16 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"groups": sorted(names or [], key=str.lower)})
 
 
-async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], group: str
-                      ) -> tuple[Optional[list[str]], int, str]:
-    """Read a group's full AP CLI config."""
+async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], group: str,
+                      tries: int = 3) -> tuple[Optional[list[str]], int, str]:
+    """Read a group's full AP CLI config.
+
+    Gateway/switch-only groups return a deterministic 500 here — callers that
+    sweep every group should pass a low ``tries`` to avoid wasted retries.
+    """
     for path in (f"/configuration/v1/ap_cli/{quote(group, safe='')}",
                  f"/configuration/v2/ap_cli/{quote(group, safe='')}"):
-        r = await _retry_get(cx, f"https://{host}{path}", hdr)
+        r = await _retry_get(cx, f"https://{host}{path}", hdr, tries=tries)
         if r is None:
             return None, 0, "request failed"
         if r.status_code == 404:
@@ -2085,34 +2092,54 @@ def _cli_ssid_cfg(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
 
 _RF_PROFILE_KIND = {
     "dot11a-radio-profile": "5 GHz",
+    "dot11a-secondary-radio-profile": "5 GHz (secondary)",
     "dot11g-radio-profile": "2.4 GHz",
     "dot11-6ghz-radio-profile": "6 GHz",
     "dot11-6GHz-radio-profile": "6 GHz",
     "arm-profile": "ARM",
-    "am-scan-profile": "AM scan",
-    "spectrum-profile": "Spectrum",
 }
+_RF_RADIO_ORDER = {"2.4 GHz": 0, "5 GHz": 1, "5 GHz (secondary)": 2, "6 GHz": 3, "ARM": 4}
 
 
-def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, set[str]]:
-    """Named `rf <kind>-radio-profile "<name>"` blocks -> {name: {radio labels}}."""
-    out: dict[str, set[str]] = {}
+def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
+    """`rf <kind>-radio-profile ["<name>"]` blocks.
+
+    AOS-10 config groups usually carry one *unnamed* radio profile per band
+    (the group default); some deployments define named ones. Returns
+    ``{name_or_"": {"radios": {labels}, "settings": {k: v}}}`` — key ``""`` is
+    the group default.
+    """
+    out: dict[str, dict[str, Any]] = {}
     for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
         head = blk[0].strip()
         if not head.startswith("rf "):
             continue
         parts = head[3:].split(None, 1)
-        if len(parts) != 2:
-            continue
         label = _RF_PROFILE_KIND.get(parts[0])
-        name = _unquote(parts[1])
-        if label and name:
-            out.setdefault(name, set()).add(label)
+        if not label:
+            continue
+        name = _unquote(parts[1]) if len(parts) == 2 else ""
+        e = out.setdefault(name, {"radios": set(), "settings": {}})
+        e["radios"].add(label)
+        for ln in blk[1:]:
+            t = ln.strip()
+            if t.startswith("max-tx-power "):
+                e["settings"].setdefault("Max TX power", t.split(None, 1)[1])
+            elif t.startswith("min-tx-power "):
+                e["settings"].setdefault("Min TX power", t.split(None, 1)[1])
+            elif t.startswith("ch-bw-range "):
+                e["settings"].setdefault("Channel width", t.split(None, 1)[1])
     return out
 
 
 async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict[str, Any]]]:
-    """RF profile names across every AP group -> {name: {types:set, groups:set}}."""
+    """RF profiles across every AP group.
+
+    -> ``{display_name: {"radios": set, "groups": set, "named": bool,
+    "settings": {k: v}}}``. Unnamed group-default radio configs are keyed by
+    their AP-group name (in the Classic config-group model the RF profile is
+    per group).
+    """
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     out: dict[str, dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=45.0) as client:
@@ -2121,16 +2148,20 @@ async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict
             return None
         sem = asyncio.Semaphore(5)
 
-        async def _grp(g: str) -> tuple[str, dict[str, set[str]]]:
+        async def _grp(g: str) -> tuple[str, dict[str, dict[str, Any]]]:
             async with sem:
-                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g)
+                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, tries=1)
                 return g, _cli_rf_profiles(clis)
 
         for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
-            for nm, labels in prof.items():
-                e = out.setdefault(nm, {"types": set(), "groups": set()})
-                e["types"] |= labels
+            for nm, info in prof.items():
+                key = nm or g
+                e = out.setdefault(key, {"radios": set(), "groups": set(),
+                                         "named": bool(nm), "settings": {}})
+                e["radios"] |= info["radios"]
                 e["groups"].add(g)
+                for k, v in info["settings"].items():
+                    e["settings"].setdefault(k, v)
     return out
 
 

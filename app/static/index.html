@@ -410,8 +410,34 @@
     background-size: 300% 100%; animation: shim 1.25s ease-in-out infinite;
   }
   @keyframes shim { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+  /* animated loading — shared */
+  .loadrow { display: flex; align-items: center; gap: 9px; margin: 2px 0 12px; }
+  .loadrow .spin {
+    width: 13px; height: 13px; flex: none; border-radius: 50%;
+    border: 2px solid var(--accent-line); border-top-color: var(--accent);
+    animation: lspin .7s linear infinite;
+  }
+  .loadrow .ltext {
+    font-size: 12px; font-weight: 600; letter-spacing: .01em;
+    background: linear-gradient(90deg, var(--muted) 30%, var(--accent) 50%, var(--muted) 70%);
+    background-size: 220% 100%; -webkit-background-clip: text; background-clip: text;
+    color: transparent; animation: lsweep 1.4s ease-in-out infinite;
+  }
+  @keyframes lspin { to { transform: rotate(360deg); } }
+  @keyframes lsweep { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+  .skl {
+    display: block; height: 11px; border-radius: 5px;
+    background: linear-gradient(90deg, var(--surface-2) 18%, var(--border) 40%, var(--surface-2) 62%);
+    background-size: 300% 100%; animation: shim 1.25s ease-in-out infinite;
+  }
+  tr.skl-row td { padding: 11px 12px; }
+  tr.skl-row:nth-child(odd)  .skl { animation-delay: .0s; }
+  tr.skl-row:nth-child(even) .skl { animation-delay: .18s; }
+  .egroup-skl { display: grid; gap: 10px; margin-top: 6px; }
+  .egroup-skl .skl { height: 46px; border-radius: 10px; }
   @media (prefers-reduced-motion: reduce) {
-    .pchip.loading .pdot, .s-value.shimmer { animation: none; }
+    .pchip.loading .pdot, .s-value.shimmer, .skl, .loadrow .spin, .loadrow .ltext { animation: none; }
+    .loadrow .ltext { background: none; color: var(--muted); }
   }
 
   /* detail drill-down */
@@ -1606,7 +1632,8 @@
       ["name", "SSID"], ["status", "Status"], ["security", "Security"], ["securityLevel", "Type"],
       ["band", "Bands"], ["vlan", "VLAN"], ["clients", "Clients"], ["groups", "AP Groups"]] },
     "rf-profiles": { title: "RF Profiles", cols: [
-      ["name", "RF Profile"], ["bands", "Radios"], ["groups", "AP Groups"]] },
+      ["name", "RF Profile"], ["scope", "Scope"], ["radios", "Radios"],
+      ["txpower", "Max TX"], ["chwidth", "Ch. width"], ["groups", "AP Groups"]] },
     sites: { title: "Sites", drill: "site", idKey: "id", cols: [
       ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
       ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },
@@ -1735,6 +1762,32 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
+  function loadrow(text) {
+    return '<span class="loadrow"><span class="spin"></span>' +
+           '<span class="ltext">' + text + '</span></span>';
+  }
+  function skeletonTable(def) {
+    var ncol = def.cols.length + (def.drill ? 1 : 0);
+    var thead = tableEl.tHead, tbody = tableEl.tBodies[0];
+    thead.innerHTML = "";
+    var htr = thead.insertRow();
+    def.cols.forEach(function (c) {
+      var th = document.createElement("th"); th.textContent = c[1]; htr.appendChild(th);
+    });
+    if (def.drill) htr.appendChild(document.createElement("th"));
+    tbody.innerHTML = "";
+    for (var i = 0; i < 7; i++) {
+      var tr = tbody.insertRow(); tr.className = "skl-row";
+      for (var j = 0; j < ncol; j++) {
+        var td = tr.insertCell();
+        var s = document.createElement("span");
+        s.className = "skl";
+        s.style.width = (j === 0 ? 62 : 34 + (i * 7 + j * 13) % 46) + "%";
+        td.appendChild(s);
+      }
+    }
+  }
+
   function openDetail(entity) {
     var def = DETAIL[entity];
     if (!def) return;
@@ -1749,17 +1802,24 @@
     detailEl.hidden = false;
     entityEl.hidden = true;
     listEl.hidden = false;
-    countEl.textContent = "Loading…";
-    tableEl.tHead.innerHTML = ""; tableEl.tBodies[0].innerHTML = "";
+    countEl.innerHTML = loadrow("Loading " + def.title.toLowerCase() + "…");
+    skeletonTable(def);
     fetchDetail(entity);
   }
 
   function fetchDetail(entity) {
     var rb = document.getElementById("detail-refresh");
+    var def = DETAIL[entity];
     rb.disabled = true;
+    countEl.innerHTML = loadrow("Loading " + def.title.toLowerCase() + "…");
+    skeletonTable(def);
     api("/api/list/" + activeFlavor + "/" + entity).then(function (res) {
       if (dState.entity !== entity) return;
-      if (!res.ok) { countEl.textContent = (res.body && res.body.error) || "Could not load data."; return; }
+      if (!res.ok) {
+        tableEl.tBodies[0].innerHTML = "";
+        countEl.textContent = (res.body && res.body.error) || "Could not load data.";
+        return;
+      }
       dState.rows = res.body.rows || [];
       renderDetailTable();
     }).finally(function () { rb.disabled = false; });
@@ -1772,7 +1832,8 @@
     document.getElementById("entity-title").textContent = name || "Loading…";
     document.getElementById("entity-sub").textContent = "";
     var groupsEl = document.getElementById("entity-groups");
-    groupsEl.innerHTML = '<p class="detail-count">Loading…</p>';
+    groupsEl.innerHTML = loadrow("Loading details…") +
+      '<div class="egroup-skl"><span class="skl"></span><span class="skl"></span><span class="skl"></span></div>';
     api("/api/detail/" + activeFlavor + "/" + kind + "/" + encodeURIComponent(ident)).then(function (res) {
       if (!res.ok) {
         groupsEl.innerHTML = "";
@@ -1874,11 +1935,13 @@
     var legend = document.getElementById("topo-legend");
     if (!meta.siteId) { box.hidden = true; return; }
     box.hidden = false;
-    wrap.innerHTML = "";
     legend.innerHTML = "";
-    note.textContent = "Loading…";
+    note.textContent = "";
+    wrap.innerHTML = loadrow("Building topology…") +
+      '<div class="egroup-skl"><span class="skl" style="height:120px"></span></div>';
     api("/api/topology/" + activeFlavor + "/" + encodeURIComponent(meta.siteId)).then(function (res) {
       if (!res.ok || !res.body.nodes) {
+        wrap.innerHTML = "";
         note.textContent = (res.body && res.body.error) || "Topology unavailable for this site.";
         return;
       }
