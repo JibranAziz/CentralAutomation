@@ -1388,7 +1388,7 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
           async with sem:
-            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, sweep=True, use_cache=True)
+            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, tries=5, sweep=True, use_cache=True)
             cfg = _cli_ssid_cfg(clis)
             for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
                          f"/configuration/v2/wlan/{quote(g, safe='')}"):
@@ -1410,7 +1410,9 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
                 return g, res, cfg
             return g, [], cfg
 
-        for g, res, cfg in await asyncio.gather(*[_grp(n) for n in (names or [])]):
+        async with _AP_CLI_SWEEP_LOCK:
+            swept = await asyncio.gather(*[_grp(n) for n in (names or [])])
+        for g, res, cfg in swept:
             for nm, sec, typ in res:
                 e = out.setdefault(nm, {"groups": set(), "security": "", "type": "", "mon": {}})
                 e["groups"].add(g)
@@ -1978,6 +1980,11 @@ _AP_CLI_TTL = 120.0
 # global ceiling on concurrent ap_cli calls — the SSID + RF sweeps can otherwise
 # stack up and trip the config API's rate limiter
 _AP_CLI_SEM = asyncio.Semaphore(4)
+# serialize the all-groups ap_cli sweeps (SSID map, RF profiles) against each
+# other so the second one runs entirely off the 120 s cache the first fills,
+# instead of both bursting the rate-limity config API at once (which made the
+# overview card and the list disagree by a group or two)
+_AP_CLI_SWEEP_LOCK = asyncio.Lock()
 
 
 def _ap_cli_cache_clear(host: str, group: Optional[str] = None) -> None:
@@ -2190,10 +2197,12 @@ async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict
 
         async def _grp(g: str) -> tuple[str, dict[str, dict[str, Any]]]:
             async with sem:
-                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, sweep=True, use_cache=True)
+                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, tries=5, sweep=True, use_cache=True)
                 return g, _cli_rf_profiles(clis)
 
-        for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
+        async with _AP_CLI_SWEEP_LOCK:
+            swept = await asyncio.gather(*[_grp(n) for n in names])
+        for g, prof in swept:
             for nm, info in prof.items():
                 key = nm or g
                 e = out.setdefault(key, {"bands": {}, "groups": set(), "named": bool(nm)})
