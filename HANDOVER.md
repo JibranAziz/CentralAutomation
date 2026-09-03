@@ -25,9 +25,15 @@ Browser ──HTTPS──> front nginx (116.255.25.100)  ──TCP/SNI passthrou
                                                         └─ httpx ──> Aruba Central APIs
 ```
 
-- **No credential storage.** Sessions live only in the uvicorn process memory,
-  keyed by cookie `acs_sid` (12 h idle TTL). New browser = new session. Restart
-  clears everything.
+- **No server-side credential storage.** Sessions live only in the uvicorn
+  process memory, keyed by cookie `acs_sid` (12 h idle TTL). New browser = new
+  session. Restart clears everything.
+- **"Remember Client ID & Secret" checkbox** (per connect form) is purely
+  client-side: `wire()` stores `{clientId, clientSecret, baseUrl|cluster}` in
+  `localStorage["acs.creds.<classic|new>"]` on submit when ticked, clears it when
+  unticked, and `loadRemembered()` prefills on load. The **refresh token is never
+  saved** — that's the point (Classic tokens rotate, so you re-enter it each time
+  it expires). Nothing about this touches the server.
 - The **front nginx** at `116.255.25.100` is *not* part of this repo and is not on
   the app server. It forwards `centralautomation.arubademo.online:443` straight
   through to `10.0.0.151:443` (SNI/TCP passthrough — TLS is not terminated there).
@@ -170,11 +176,18 @@ verified live (7); Classic SSID path analogous, not re-verified.
     absent. Detail also GETs `/configuration/v1/wlan/{group}/{ssid}` →
     `{wlan:{essid,type,vlan,hide_ssid,wpa_passphrase,captive_profile_name,zone,
     access_rules,...}}`. Verified: 40 SSIDs across 27 groups.
+  - **AP-CLI cache** — the SSID and RF-profile sweeps both call `_ap_cli_get`
+    for every group and run concurrently during overview load, which tripped the
+    config API's rate limiter and made the two sweeps disagree (overview card
+    said 10, list said 12). Fixed with `_AP_CLI_CACHE` (per `(host, group)`,
+    120 s TTL, `use_cache=True` on the read-only sweeps only — never the
+    read-modify-write config push, which also calls `_ap_cli_cache_clear` on a
+    successful write) + a global `_AP_CLI_SEM` (4) ceiling on concurrent ap_cli
+    calls.
   - **RF Profiles** (Classic-only card, like AP Groups): `_classic_rf_profiles`
-    fetches each group's AP-CLI (5-wide semaphore, `_ap_cli_get(..., sweep=True)`
-    — still retries 429/502-504 three times so rate-limited groups aren't lost,
-    but skips retrying the deterministic 500 that gateway/switch groups return)
-    and `_cli_rf_profiles`
+    fetches each group's AP-CLI (`_ap_cli_get(..., sweep=True, use_cache=True)`
+    — retries 429/502-504 three times so rate-limited groups aren't lost, skips
+    the deterministic 500 that gateway/switch groups return) and `_cli_rf_profiles`
     parses `rf <kind>-radio-profile` blocks: `dot11a` → 5 GHz, `dot11a-secondary`
     → 5 GHz (secondary), `dot11g` → 2.4 GHz, `dot11-6ghz` → 6 GHz. In the AOS-10
     config-group model these blocks are almost always **unnamed** (one radio

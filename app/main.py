@@ -1388,7 +1388,7 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
           async with sem:
-            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, sweep=True)
+            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, sweep=True, use_cache=True)
             cfg = _cli_ssid_cfg(clis)
             for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
                          f"/configuration/v2/wlan/{quote(g, safe='')}"):
@@ -1970,18 +1970,41 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"groups": sorted(names or [], key=str.lower)})
 
 
+# Short-lived cache so the SSID and RF-profile sweeps (both hit ap_cli for
+# every group, and run concurrently during overview load) don't hammer the
+# rate-limity config API and lose groups to 429s. Keyed by (host, group).
+_AP_CLI_CACHE: dict[tuple[str, str], tuple[float, list[str]]] = {}
+_AP_CLI_TTL = 120.0
+# global ceiling on concurrent ap_cli calls — the SSID + RF sweeps can otherwise
+# stack up and trip the config API's rate limiter
+_AP_CLI_SEM = asyncio.Semaphore(4)
+
+
+def _ap_cli_cache_clear(host: str, group: Optional[str] = None) -> None:
+    for k in [k for k in _AP_CLI_CACHE if k[0] == host and (group is None or k[1] == group)]:
+        _AP_CLI_CACHE.pop(k, None)
+
+
 async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], group: str,
-                      tries: int = 3, sweep: bool = False) -> tuple[Optional[list[str]], int, str]:
+                      tries: int = 3, sweep: bool = False, use_cache: bool = False
+                      ) -> tuple[Optional[list[str]], int, str]:
     """Read a group's full AP CLI config.
 
     Gateway/switch-only groups return a deterministic 500 here. Callers that
     sweep every group pass ``sweep=True`` so we still retry rate-limits /
     502-504 but not the 500, avoiding wasted retries on non-AP groups.
+    ``use_cache`` serves a <=120s-old copy (used by the read-only sweeps, never
+    by the read-modify-write config push).
     """
+    if use_cache:
+        hit = _AP_CLI_CACHE.get((host, group))
+        if hit and (_now() - hit[0]) < _AP_CLI_TTL:
+            return list(hit[1]), 200, ""
     retry_on = (429, 502, 503, 504) if sweep else (429, 500, 502, 503, 504)
     for path in (f"/configuration/v1/ap_cli/{quote(group, safe='')}",
                  f"/configuration/v2/ap_cli/{quote(group, safe='')}"):
-        r = await _retry_get(cx, f"https://{host}{path}", hdr, tries=tries, retry_on=retry_on)
+        async with _AP_CLI_SEM:
+            r = await _retry_get(cx, f"https://{host}{path}", hdr, tries=tries, retry_on=retry_on)
         if r is None:
             return None, 0, "request failed"
         if r.status_code == 404:
@@ -1990,8 +2013,11 @@ async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], gro
             return None, r.status_code, (r.text or "")[:300]
         body = r.json() if r.content else []
         if isinstance(body, list):
-            return [str(x) for x in body], 200, ""
-        return [str(x) for x in (body.get("clis") or body.get("data") or [])], 200, ""
+            clis = [str(x) for x in body]
+        else:
+            clis = [str(x) for x in (body.get("clis") or body.get("data") or [])]
+        _AP_CLI_CACHE[(host, group)] = (_now(), list(clis))
+        return clis, 200, ""
     return None, 404, "ap_cli endpoint not found"
 
 
@@ -2164,7 +2190,7 @@ async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict
 
         async def _grp(g: str) -> tuple[str, dict[str, dict[str, Any]]]:
             async with sem:
-                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, sweep=True)
+                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, sweep=True, use_cache=True)
                 return g, _cli_rf_profiles(clis)
 
         for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
@@ -2240,6 +2266,11 @@ async def _classic_central_rf_detail(host: str, token: str, name: str) -> Option
     grp_list = ", ".join(sorted(e["groups"]))
     groups = [g for g in groups if g]
     groups.append({"label": "Applied to", "fields": [["AP groups", grp_list or "—"]]})
+    groups.append({"label": "Note", "fields": [[
+        "Channels & width",
+        "Only values changed from the regulatory default are stored in Central's "
+        "config API. Fields shown as “Regulatory default” use the default "
+        "channel list / width for the AP’s country."]]})
     return {
         "title": name,
         "subtitle": "Named RF profile" if e["named"] else "Group-default RF profile",
@@ -2366,6 +2397,8 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
                     f"https://{conn['host']}/configuration/v1/ap_cli/{quote(g, safe='')}",
                     headers=hdr_json, json={"clis": merged})
                 ok = 200 <= r.status_code < 300
+                if ok:
+                    _ap_cli_cache_clear(conn["host"], g)
                 results.append({"group": g, "ok": ok, "status": r.status_code,
                                 "error": "" if ok else (r.text or "")[:300]})
             except Exception as exc:
