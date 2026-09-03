@@ -1447,7 +1447,7 @@
   });
 
   /* ---- Configuration (Classic AP-CLI writes) ---- */
-  var cfgKind = null, cfgGroups = [], cliTouched = false;
+  var cfgKind = null, cfgGroups = [], cliTouched = false, cfgLoadedName = "";
   var overviewInner = document.getElementById("dash-overview");
   var configForm = document.getElementById("config-form");
   var cgroupList = document.getElementById("cgroup-list");
@@ -1488,6 +1488,21 @@
     var m = CFG_META[cfgKind];
     cliEl.value = m.tpl(nameEl.value.trim());
     cliTouched = false;
+    cfgLoadedName = nameEl.value.trim();
+  }
+
+  // rename the SSID/access-rule/essid references in the CLI textarea when the
+  // name field is edited after a Load (or template)
+  function renameCliRefs(oldN, newN) {
+    if (!oldN || oldN === newN) return;
+    var o = oldN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var q = /\s/.test(newN) ? '"' + newN + '"' : newN;
+    cliEl.value = cliEl.value
+      .replace(new RegExp('^(wlan ssid-profile )"?' + o + '"?\\s*$', "gm"), "$1" + q)
+      .replace(new RegExp('^(wlan access-rule )"?' + o + '"?\\s*$', "gm"), "$1" + q)
+      .replace(new RegExp('^(wlan mac-acl )"?' + o + '"?\\s*$', "gm"), "$1" + q)
+      .replace(new RegExp('^(\\s+essid )"?' + o + '"?\\s*$', "gm"), "$1" + q);
+    document.getElementById("cf-cli-view").textContent = cliEl.value;
   }
 
   /* ---- RADIUS structured form ---- */
@@ -1858,12 +1873,22 @@
         nameEl.value = picked;
         cliEl.value = res.body.cli.replace(/\s+$/, "") + "\n";
         cliTouched = true;
+        cfgLoadedName = picked;
       }
       note.textContent = "Loaded " + picked + " from " + g + " — secrets show as ******** (replace before deploying).";
     }).catch(function () { note.textContent = "Network error."; });
   });
   cliEl.addEventListener("input", function () { cliTouched = true; });
   nameEl.addEventListener("input", function () { if (!cliTouched) applyTemplate(); });
+  // once the CLI has been loaded/edited, apply a name change to its references
+  // (on commit — blur/Enter — not every keystroke)
+  nameEl.addEventListener("change", function () {
+    var nn = nameEl.value.trim();
+    if (cfgKind === "ssid" && cliTouched && cfgLoadedName && cfgLoadedName !== nn) {
+      renameCliRefs(cfgLoadedName, nn);
+      cfgLoadedName = nn;
+    }
+  });
   document.getElementById("cgroup-search").addEventListener("input", function () { renderGroupList(this.value); });
   document.getElementById("cgroup-all").addEventListener("click", function () {
     cgroupList.querySelectorAll(".cg").forEach(function (c) { c.checked = true; });
