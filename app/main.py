@@ -2079,6 +2079,22 @@ def _merge_cli(existing: list[str], submitted: list[str]) -> list[str]:
     return merged
 
 
+def _cli_drop_block(existing: list[str], header: str) -> list[str]:
+    """Remove the top-level block whose header matches (and its indented body)."""
+    out: list[str] = []
+    i = 0
+    while i < len(existing):
+        ln = existing[i]
+        if ln.strip() == header.strip() and not ln[:1].isspace():
+            i += 1
+            while i < len(existing) and existing[i][:1].isspace():
+                i += 1
+            continue
+        out.append(ln)
+        i += 1
+    return out
+
+
 def _kw(line: str) -> str:
     """The leading keyword of a CLI sub-line (everything up to the first space)."""
     return line.strip().split(None, 1)[0] if line.strip() else ""
@@ -2432,11 +2448,12 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
     preview = bool(b.get("preview"))
     submerge = bool(b.get("submerge"))
     managed = [str(k) for k in (b.get("managed") or [])]
-    if not submitted:
-        return _err(400, "The configuration is empty.")
+    remove = [str(h).strip() for h in (b.get("remove") or []) if str(h).strip()]
     if not groups:
         return _err(400, "Select at least one AP group.")
-    if not _cli_blocks(submitted):
+    if not submitted and not remove:
+        return _err(400, "The configuration is empty.")
+    if submitted and not _cli_blocks(submitted):
         return _err(400, "The configuration must start with a top-level command (no leading spaces).")
 
     hdr_json = {"Authorization": f"Bearer {conn['access_token']}",
@@ -2449,8 +2466,12 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
                 results.append({"group": g, "ok": False, "status": sc,
                                 "error": f"read failed: {msg}"})
                 continue
-            merged = (_merge_cli_submerge(cur, submitted, managed) if submerge
-                      else _merge_cli(cur, submitted))
+            merged = list(cur)
+            for header in remove:
+                merged = _cli_drop_block(merged, header)
+            if submitted:
+                merged = (_merge_cli_submerge(merged, submitted, managed) if submerge
+                          else _merge_cli(merged, submitted))
             if preview:
                 results.append({"group": g, "ok": True, "status": 200,
                                 "preview": "\n".join(merged), "added": len(merged) - len(cur)})

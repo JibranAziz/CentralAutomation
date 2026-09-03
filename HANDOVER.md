@@ -332,10 +332,12 @@ leading keyword (`_kw`), keeps unmanaged children, and drops any keyword in
 `managed` that the submitted block omits (so the form's "Also remove options
 that aren't set" checkbox works). Blocks with no existing match are appended.
 
-`POST /api/config/classic/cli` `{cli, groups[], preview, submerge?, managed?}`:
-for each group it GETs the live CLI, merges (`submerge` → `_merge_cli_submerge`,
-else `_merge_cli`), and either returns the merged text (`preview:true`) or POSTs
-it (and `_ap_cli_cache_clear`s the group). The UI has three cards:
+`POST /api/config/classic/cli` `{cli, groups[], preview, submerge?, managed?, remove?}`:
+for each group it GETs the live CLI, drops any block whose header is in `remove`
+(`_cli_drop_block`), merges the rest (`submerge` → `_merge_cli_submerge`, else
+`_merge_cli`), and either returns the merged text (`preview:true`) or POSTs it
+(and `_ap_cli_cache_clear`s the group). `remove`-only (no `cli`) = delete — the
+RF form's "Delete this named profile" button sends `{remove: rfpHeaders()}`. The UI has three cards:
 - **Configure SSID** — seeds `wlan ssid-profile` + `wlan access-rule` into an
   editable textarea.
 - **Create RADIUS server** — structured `#rform` → `wlan auth-server` block.
@@ -354,8 +356,13 @@ it (and `_ap_cli_cache_clear`s the group). The UI has three cards:
   in the picked group (`?names=rf dot11a-radio-profile`, plus a "group default"
   entry) and pulls the matching blocks. `_merge_cli_submerge` matches on the
   full header incl. name, so named and unnamed profiles are edited
-  independently. Verified live (preview) 2026-09-03: new named profile appends
-  cleanly, editing `API_Test` leaves the unnamed default untouched.
+  independently. A **Delete** button (shown once the name field is set) sends
+  `{remove: rfpHeaders()}`.
+  **Verified with real writes to Central 2026-09-03** (`AOS8-Test-Group`):
+  create `ACS_WriteTest` → all blocks + `zone` landed, group default untouched;
+  edit → TX power replaced in place, channels/CQA added, spectrum kept; delete →
+  all blocks gone, group default byte-identical to baseline. Every keyword
+  accepted.
 
 All three share the group multi-select, **Preview merge** (exact per-group text)
 and confirm-gated **Deploy**. `GET /api/config/classic/cli/{group}` returns one
