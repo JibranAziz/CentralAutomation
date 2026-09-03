@@ -301,12 +301,20 @@
   #config-form .field-row { display: flex; gap: 12px; }
   #config-form .field-row .field { flex: 1; }
   #config-form input[type="text"], #config-form input[type="password"],
-  #config-form input[type="search"], #config-form select {
+  #config-form input[type="search"], #config-form input[type="number"], #config-form select {
     width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink);
     background: var(--surface); border: 1px solid var(--border-strong);
     border-radius: 9px; padding: 10px 12px;
   }
   #config-form input[data-mono] { font-family: var(--mono); font-size: 12.5px; }
+  .rfp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .rfp-table th, .rfp-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+  .rfp-table thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .rfp-table td:first-child, .rfp-table th:first-child { white-space: nowrap; color: var(--muted); }
+  .rfp-table td:not(:first-child) { width: 26%; }
+  #config-form .rfp-table input[type="text"], #config-form .rfp-table input[type="number"],
+  #config-form .rfp-table select { width: 100%; min-width: 76px; padding: 5px 7px; font-size: 12px; border-radius: 7px; }
+  .rfp-table input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); }
   #config-form textarea {
     width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.55;
     color: var(--ink); background: var(--surface); border: 1px solid var(--border-strong);
@@ -930,6 +938,13 @@
               </div>
               <div class="s-sub">Add a RADIUS auth server to selected AP groups</div>
             </button>
+            <button class="statcard" type="button" data-config="rf" style="--c:#0369a1">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 8v0M5.2 5.2a4 4 0 0 0 0 5.6M10.8 10.8a4 4 0 0 0 0-5.6M3 3a7 7 0 0 0 0 10M13 13A7 7 0 0 0 13 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/></svg></span>
+                <span class="s-label">Configure RF profile</span>
+              </div>
+              <div class="s-sub">Set radio options and push them to selected AP groups</div>
+            </button>
           </div>
         </div>
       </div>
@@ -983,6 +998,68 @@
             <label class="chk"><input type="checkbox" id="rf-q-auth" checked> Authentication</label>
             <label class="chk" style="margin-top:4px"><input type="checkbox" id="rf-q-acct" checked> Accounting</label>
           </div>
+        </div>
+
+        <!-- RF profile: structured per-band form (backend pushes the generated CLI) -->
+        <div id="rfp-form" hidden>
+          <div class="hint" style="margin-bottom:10px">Edits each selected group's <strong>default radio profile</strong>.
+            Only the fields you set below are changed — other radio settings in the group are left alone.
+            Clear a field to fall back to Central's regulatory default.</div>
+          <div class="tablewrap">
+            <table class="rfp-table">
+              <thead><tr><th>Option</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz</th></tr></thead>
+              <tbody>
+                <tr><td>Configure this band</td>
+                  <td><input type="checkbox" class="rfp" id="rfp-en-24" checked></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-en-5" checked></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-en-6"></td></tr>
+                <tr><td>Allowed channels</td>
+                  <td><input type="text" class="rfp" id="rfp-ch-24" data-mono placeholder="1,6,11"></td>
+                  <td><input type="text" class="rfp" id="rfp-ch-5" data-mono placeholder="36,40,44,48,…"></td>
+                  <td><input type="text" class="rfp" id="rfp-ch-6" data-mono placeholder="1,5,9,13,…"></td></tr>
+                <tr><td>Min transmit power (dBm)</td>
+                  <td><input type="number" class="rfp" id="rfp-min-24" min="1" max="51"></td>
+                  <td><input type="number" class="rfp" id="rfp-min-5" min="1" max="51"></td>
+                  <td><input type="number" class="rfp" id="rfp-min-6" min="1" max="51"></td></tr>
+                <tr><td>Max transmit power (dBm)</td>
+                  <td><input type="number" class="rfp" id="rfp-max-24" min="1" max="51"></td>
+                  <td><input type="number" class="rfp" id="rfp-max-5" min="1" max="51"></td>
+                  <td><input type="number" class="rfp" id="rfp-max-6" min="1" max="51"></td></tr>
+                <tr><td>Channel width</td>
+                  <td><select class="rfp" id="rfp-bw-24"><option value="">Default</option><option>20</option><option>40</option></select></td>
+                  <td><select class="rfp" id="rfp-bw-5"><option value="">Default</option><option>20</option><option>40</option><option>80</option><option>160</option></select></td>
+                  <td><select class="rfp" id="rfp-bw-6"><option value="">Default</option><option>20</option><option>40</option><option>80</option><option>160</option></select></td></tr>
+                <tr><td>CSA count</td>
+                  <td><input type="number" class="rfp" id="rfp-csa-24" min="0" max="20"></td>
+                  <td><input type="number" class="rfp" id="rfp-csa-5" min="0" max="20"></td>
+                  <td><input type="number" class="rfp" id="rfp-csa-6" min="0" max="20"></td></tr>
+                <tr><td>High-noise backoff (s)</td>
+                  <td><input type="number" class="rfp" id="rfp-noise-24" min="0"></td>
+                  <td><input type="number" class="rfp" id="rfp-noise-5" min="0"></td>
+                  <td><input type="number" class="rfp" id="rfp-noise-6" min="0"></td></tr>
+                <tr><td>Advertise 802.11d &amp; 802.11h</td>
+                  <td><input type="checkbox" class="rfp" id="rfp-dot11h-24"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-dot11h-5"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-dot11h-6"></td></tr>
+                <tr><td>Spectrum monitor</td>
+                  <td><input type="checkbox" class="rfp" id="rfp-spec-24"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-spec-5"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-spec-6"></td></tr>
+                <tr><td>Channel quality aware</td>
+                  <td><input type="checkbox" class="rfp" id="rfp-cqa-24"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-cqa-5"></td>
+                  <td><input type="checkbox" class="rfp" id="rfp-cqa-6"></td></tr>
+                <tr><td>Disable ARM/WIDS functions</td>
+                  <td><select class="rfp" id="rfp-arm-24"><option value="">Keep</option><option value="off">Off (enabled)</option><option value="all">All</option><option value="arm">ARM</option><option value="wids">WIDS</option></select></td>
+                  <td><select class="rfp" id="rfp-arm-5"><option value="">Keep</option><option value="off">Off (enabled)</option><option value="all">All</option><option value="arm">ARM</option><option value="wids">WIDS</option></select></td>
+                  <td><select class="rfp" id="rfp-arm-6"><option value="">Keep</option><option value="off">Off (enabled)</option><option value="all">All</option><option value="arm">ARM</option><option value="wids">WIDS</option></select></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <label class="chk" style="margin-top:12px"><input type="checkbox" id="rfp-replace"> Also remove radio options that aren't set above</label>
+          <div class="hint" style="margin-top:2px">Off: only the options you set are added or changed. On: any of the managed options
+            (channels, TX power, width, CSA count, backoff, 802.11d/h, spectrum monitor, channel-quality-aware, ARM/WIDS) left blank here is
+            <em>removed</em> from the group. Use “Load from” first so the form matches the group.</div>
         </div>
 
         <div class="field" id="cf-cli-wrap">
@@ -1346,7 +1423,8 @@
           "\n  ip 10.0.0.20\n  key CHANGE_ME_SECRET\n  port 1812\n  acctport 1813" +
           "\n  rfc3576\n  cppm-rfc3576-port 5999\n  rfc5997\n";
       }
-    }
+    },
+    rf: { title: "Configure RF profile", nameLabel: "" }
   };
 
   function cfgErr(msg) {
@@ -1428,20 +1506,95 @@
     if (el) el.addEventListener(el.type === "checkbox" ? "change" : "input", rformToCli);
   });
 
+  /* ---- RF profile structured form ---- */
+  var RFP_BANDS = [["24", "dot11g"], ["5", "dot11a"], ["6", "dot11-6ghz"]];
+  var RFP_MANAGED = ["allowed-channels", "min-tx-power", "max-tx-power", "ch-bw-range",
+    "csa-count", "high-noise-backoff-time", "dot11h", "spectrum-monitor",
+    "channel-quality-aware", "disable-arm-wids-functions"];
+  function rfp(id) { return document.getElementById("rfp-" + id); }
+  function rfpDefaults() {
+    RFP_BANDS.forEach(function (b) {
+      var s = b[0];
+      rfp("en-" + s).checked = s !== "6";
+      ["ch-", "min-", "max-", "csa-", "noise-"].forEach(function (p) { rfp(p + s).value = ""; });
+      rfp("bw-" + s).value = ""; rfp("arm-" + s).value = "";
+      ["dot11h-", "spec-", "cqa-"].forEach(function (p) { rfp(p + s).checked = false; });
+    });
+    document.getElementById("rfp-replace").checked = false;
+  }
+  function rfpBlock(s, kind) {
+    if (!rfp("en-" + s).checked) return "";
+    var L = ["rf " + kind + "-radio-profile"];
+    var ch = rfp("ch-" + s).value.trim().replace(/\s+/g, ""); if (ch) L.push("  allowed-channels " + ch);
+    var mn = rfp("min-" + s).value.trim(); if (mn !== "") L.push("  min-tx-power " + mn);
+    var mx = rfp("max-" + s).value.trim(); if (mx !== "") L.push("  max-tx-power " + mx);
+    var bw = rfp("bw-" + s).value; if (bw) L.push("  ch-bw-range " + bw + "MHz " + bw + "MHz");
+    var csa = rfp("csa-" + s).value.trim(); if (csa !== "") L.push("  csa-count " + csa);
+    var ns = rfp("noise-" + s).value.trim(); if (ns !== "") L.push("  high-noise-backoff-time " + ns);
+    if (rfp("dot11h-" + s).checked) L.push("  dot11h");
+    if (rfp("spec-" + s).checked) L.push("  spectrum-monitor");
+    if (rfp("cqa-" + s).checked) L.push("  channel-quality-aware");
+    var arm = rfp("arm-" + s).value; if (arm) L.push("  disable-arm-wids-functions " + arm);
+    return L.join("\n");
+  }
+  function rfpToCli() {
+    var blocks = RFP_BANDS.map(function (b) { return rfpBlock(b[0], b[1]); }).filter(Boolean);
+    cliEl.value = blocks.join("\n") + (blocks.length ? "\n" : "");
+    document.getElementById("cf-cli-view").textContent = cliEl.value || "(no bands selected)";
+  }
+  function fillRfpFromCli(txt) {
+    rfpDefaults();
+    RFP_BANDS.forEach(function (b) { rfp("en-" + b[0]).checked = false; });
+    var cur = null;
+    txt.split("\n").forEach(function (line) {
+      var indented = /^\s/.test(line);
+      var t = line.trim();
+      var mh = t.match(/^rf (dot11g|dot11a|dot11-6ghz)-radio-profile\b/);
+      if (mh && !indented) {
+        cur = mh[1] === "dot11g" ? "24" : mh[1] === "dot11a" ? "5" : "6";
+        rfp("en-" + cur).checked = true;
+        return;
+      }
+      if (!indented) { cur = null; return; }
+      if (!cur) return;
+      var m;
+      if ((m = t.match(/^allowed-channels (.+)$/))) rfp("ch-" + cur).value = m[1];
+      else if ((m = t.match(/^min-tx-power (\d+)$/))) rfp("min-" + cur).value = m[1];
+      else if ((m = t.match(/^max-tx-power (\d+)$/))) rfp("max-" + cur).value = m[1];
+      else if ((m = t.match(/^ch-bw-range (\d+)MHz/))) rfp("bw-" + cur).value = m[1];
+      else if ((m = t.match(/^csa-count (\d+)$/))) rfp("csa-" + cur).value = m[1];
+      else if ((m = t.match(/^high-noise-backoff-time (\d+)$/))) rfp("noise-" + cur).value = m[1];
+      else if (t === "dot11h") rfp("dot11h-" + cur).checked = true;
+      else if (t === "spectrum-monitor") rfp("spec-" + cur).checked = true;
+      else if (t === "channel-quality-aware") rfp("cqa-" + cur).checked = true;
+      else if ((m = t.match(/^disable-arm-wids-functions (\S+)$/))) rfp("arm-" + cur).value = m[1];
+    });
+    rfpToCli();
+  }
+  document.querySelectorAll("#rfp-form .rfp").forEach(function (el) {
+    var ev = (el.type === "checkbox" || el.tagName === "SELECT") ? "change" : "input";
+    el.addEventListener(ev, rfpToCli);
+  });
+
   function openConfig(kind) {
     cfgKind = kind;
     var m = CFG_META[kind];
     document.getElementById("config-form-title").textContent = m.title;
     var isRadius = kind === "radius";
-    document.getElementById("cf-name-wrap").hidden = isRadius;
-    document.getElementById("cf-cli-wrap").hidden = isRadius;
-    document.getElementById("cf-reset-tpl").hidden = isRadius;
+    var isRf = kind === "rf";
+    var structured = isRadius || isRf;
+    document.getElementById("cf-name-wrap").hidden = structured;
+    document.getElementById("cf-cli-wrap").hidden = structured;
+    document.getElementById("cf-reset-tpl").hidden = structured;
     document.getElementById("rform").hidden = !isRadius;
-    document.getElementById("rf-cli-details").hidden = !isRadius;
+    document.getElementById("rfp-form").hidden = !isRf;
+    document.getElementById("rf-cli-details").hidden = !structured;
+    document.getElementById("cf-load-name").hidden = isRf;
     if (isRadius) { rformDefaults(); rformToCli(); }
+    else if (isRf) { rfpDefaults(); rfpToCli(); }
     else { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     nameEl.value = "";
-    if (!isRadius) applyTemplate();
+    if (!structured) applyTemplate();
     resultsEl.innerHTML = "";
     cfgErr("");
     overviewInner.hidden = true;
@@ -1462,10 +1615,12 @@
       });
     });
   }
+  var RFP_HEADERS = ["rf dot11g-radio-profile", "rf dot11a-radio-profile", "rf dot11-6ghz-radio-profile"];
   function blockPrefix() {
     return cfgKind === "ssid" ? "wlan ssid-profile" : "wlan auth-server";
   }
   function blockHeaders(name) {
+    if (cfgKind === "rf") return RFP_HEADERS;
     var n = (name || nameEl.value).trim();
     if (!n) return [];
     return cfgKind === "ssid"
@@ -1527,13 +1682,26 @@
   document.getElementById("config-back").addEventListener("click", closeConfig);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
   document.getElementById("cf-load-group").addEventListener("change", function () {
-    loadNamesForGroup(this.value);
+    if (cfgKind !== "rf") loadNamesForGroup(this.value);
   });
   document.getElementById("cf-load").addEventListener("click", function () {
     var note = document.getElementById("cf-load-note");
     var g = document.getElementById("cf-load-group").value;
-    var picked = document.getElementById("cf-load-name").value;
     if (!g) { note.textContent = "Pick a group."; return; }
+
+    if (cfgKind === "rf") {
+      note.textContent = "Loading…";
+      api("/api/config/" + activeFlavor + "/cli/" + encodeURIComponent(g) +
+          "?block=" + encodeURIComponent(RFP_HEADERS.join("||"))).then(function (res) {
+        if (!res.ok) { note.textContent = (res.body && res.body.error) || "Read failed."; return; }
+        if (!res.body.cli) { note.textContent = "No radio profile found in " + g + "."; return; }
+        fillRfpFromCli(res.body.cli);
+        note.textContent = "Loaded radio profile from " + g + ".";
+      }).catch(function () { note.textContent = "Network error."; });
+      return;
+    }
+
+    var picked = document.getElementById("cf-load-name").value;
     if (!picked) { note.textContent = "Pick a " + (cfgKind === "ssid" ? "SSID" : "server") + " from the list."; return; }
     var headers = blockHeaders(picked);
     note.textContent = "Loading…";
@@ -1573,6 +1741,13 @@
         cfgErr("The two shared-key fields do not match."); return;
       }
     }
+    if (cfgKind === "rf") {
+      rfpToCli();
+      if (!RFP_BANDS.some(function (b) { return rfp("en-" + b[0]).checked; })) {
+        cfgErr("Select at least one band to configure."); return;
+      }
+      if (!cliEl.value.trim()) { cfgErr("Set at least one radio option."); return; }
+    }
     var groups = selectedGroups();
     var cli = cliEl.value.trim();
     if (!cli) { cfgErr("The configuration is empty."); return; }
@@ -1591,7 +1766,11 @@
     resultsEl.innerHTML = "";
     api("/api/config/" + activeFlavor + "/cli", {
       method: "POST",
-      body: JSON.stringify({ cli: cliEl.value, groups: groups, preview: preview })
+      body: JSON.stringify({
+        cli: cliEl.value, groups: groups, preview: preview,
+        submerge: cfgKind === "rf",
+        managed: (cfgKind === "rf" && document.getElementById("rfp-replace").checked) ? RFP_MANAGED : []
+      })
     }).then(function (res) {
       if (!res.ok) { cfgErr((res.body && res.body.error) || "Request failed."); return; }
       (res.body.results || []).forEach(function (r) {
@@ -1601,7 +1780,7 @@
         var g = document.createElement("span"); g.className = "cr-grp"; g.textContent = r.group;
         var msg = document.createElement("span"); msg.className = "cr-msg";
         msg.textContent = r.ok
-          ? (preview ? "+" + r.added + " lines" : "deployed")
+          ? (preview ? ((r.added >= 0 ? "+" : "") + r.added + " line" + (Math.abs(r.added) === 1 ? "" : "s")) : "deployed")
           : ("failed (" + r.status + ") " + (r.error || "")).trim();
         row.appendChild(dot); row.appendChild(g); row.appendChild(msg);
         resultsEl.appendChild(row);
