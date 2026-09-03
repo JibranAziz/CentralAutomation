@@ -179,6 +179,8 @@
     text-decoration: underline; text-underline-offset: 2px; padding: 0;
   }
   .linkbtn:hover { color: var(--ink); }
+  .linkbtn.danger { color: var(--danger); }
+  .linkbtn.danger:hover { color: var(--danger); filter: brightness(.85); }
   .status-foot {
     margin-top: 13px; padding-top: 13px; border-top: 1px solid var(--accent-line);
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -1067,6 +1069,9 @@
           <div class="hint" style="margin-top:2px">Off: only the options you set are added or changed. On: any of the managed options
             (channels, TX power, width, CSA count, backoff, 802.11d/h, spectrum monitor, channel-quality-aware, ARM/WIDS) left blank here is
             <em>removed</em> from the group. Use “Load from” first so the form matches the group.</div>
+          <div id="rfp-delete-wrap" hidden style="margin-top:12px">
+            <button type="button" class="linkbtn danger" id="rfp-delete">Delete this named profile from the selected groups</button>
+          </div>
         </div>
 
         <div class="field" id="cf-cli-wrap">
@@ -1564,6 +1569,7 @@
     var blocks = rfpHeaderKinds().map(function (kk) { return rfpBlock(kk[0], kk[1]); }).filter(Boolean);
     cliEl.value = blocks.join("\n") + (blocks.length ? "\n" : "");
     document.getElementById("cf-cli-view").textContent = cliEl.value || "(no bands selected)";
+    document.getElementById("rfp-delete-wrap").hidden = !rfpName();
   }
   function fillRfpFromCli(txt) {
     rfpDefaults();
@@ -1847,6 +1853,35 @@
   }
   document.getElementById("config-preview").addEventListener("click", function () { runConfig(true); });
   document.getElementById("config-apply").addEventListener("click", function () { runConfig(false); });
+
+  document.getElementById("rfp-delete").addEventListener("click", function () {
+    cfgErr("");
+    var n = rfpName();
+    if (!n) return;
+    var groups = selectedGroups();
+    if (!groups.length) { cfgErr("Select the AP groups to delete it from."); return; }
+    if (!window.confirm('Delete the named RF profile "' + n + '" from ' + groups.length +
+      ' group(s)? This removes all of its radio-profile blocks.')) return;
+    var btn = this;
+    btn.disabled = true; btn.textContent = "Deleting…";
+    resultsEl.innerHTML = "";
+    api("/api/config/" + activeFlavor + "/cli", {
+      method: "POST",
+      body: JSON.stringify({ remove: rfpHeaders(), groups: groups, preview: false })
+    }).then(function (res) {
+      if (!res.ok) { cfgErr((res.body && res.body.error) || "Request failed."); return; }
+      (res.body.results || []).forEach(function (r) {
+        var row = document.createElement("div");
+        row.className = "cres " + (r.ok ? "ok" : "bad");
+        row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
+        row.querySelector(".cr-grp").textContent = r.group;
+        row.querySelector(".cr-msg").textContent = r.ok ? "deleted" : ("failed (" + r.status + ") " + (r.error || "")).trim();
+        resultsEl.appendChild(row);
+      });
+      overviewLoaded[activeFlavor] = false;
+    }).catch(function () { cfgErr("Network error."); })
+      .finally(function () { btn.disabled = false; btn.textContent = "Delete this named profile from the selected groups"; });
+  });
 
   /* ---- drill-down ---- */
   var DEV_COLS = [["name", "Name"], ["status", "Status"], ["ip", "IPv4"], ["model", "Model"],
