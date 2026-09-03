@@ -183,7 +183,9 @@ verified live (7); Classic SSID path analogous, not re-verified.
     120 s TTL, `use_cache=True` on the read-only sweeps only — never the
     read-modify-write config push, which also calls `_ap_cli_cache_clear` on a
     successful write) + a global `_AP_CLI_SEM` (4) ceiling on concurrent ap_cli
-    calls.
+    calls + `_AP_CLI_SWEEP_LOCK` which serializes the two all-groups sweeps
+    against each other (the second runs entirely off the first's warm cache) +
+    `tries=5` on the sweep reads so a transiently throttled group still lands.
   - **RF Profiles** (Classic-only card, like AP Groups): `_classic_rf_profiles`
     fetches each group's AP-CLI (`_ap_cli_get(..., sweep=True, use_cache=True)`
     — retries 429/502-504 three times so rate-limited groups aren't lost, skips
