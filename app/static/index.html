@@ -185,6 +185,7 @@
   }
   .foot-actions { display: flex; gap: 14px; }
   .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+  .chk-remember { margin: 4px 0 6px; font-weight: 500; }
   .chk input { width: 15px; height: 15px; accent-color: var(--accent); }
   .status-note { margin: 8px 0 0; font-size: 11.5px; color: var(--faint); line-height: 1.45; }
   .status-note code {
@@ -711,9 +712,12 @@
           <div class="err">Refresh token is required.</div>
         </div>
 
+        <label class="chk chk-remember"><input type="checkbox" data-remember> Remember Client ID &amp; Secret on this browser</label>
+        <div class="hint" style="margin:-2px 0 12px">Saved only in this browser (localStorage) — never sent to or stored on the server. The refresh token is never saved; re-enter it when it expires.</div>
+
         <div class="info">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          Credentials are used only to open this browser session and are never written to disk. Another browser starts a fresh session.
+          The server never writes your credentials to disk — they live only in memory for this session. Another browser starts a fresh session.
         </div>
 
         <div class="formerr" data-formerr>
@@ -784,6 +788,9 @@
           <div class="err">Client secret is required.</div>
         </div>
 
+        <label class="chk chk-remember"><input type="checkbox" data-remember> Remember Client ID &amp; Secret on this browser</label>
+        <div class="hint" style="margin:-2px 0 12px">Saved only in this browser (localStorage) — never sent to or stored on the server.</div>
+
         <div class="info">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1.2 12.3 3.6v3.9c0 3.2-2.2 5-5.3 6-3.1-1-5.3-2.8-5.3-6V3.6L7 1.2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M4.8 7 6.4 8.6 9.4 5.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
           New Central uses client credentials — no token download or refresh token required.
@@ -791,7 +798,7 @@
 
         <div class="info">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          Credentials are used only to open this browser session and are never written to disk. Another browser starts a fresh session.
+          The server never writes your credentials to disk — they live only in memory for this session. Another browser starts a fresh session.
         </div>
 
         <div class="formerr" data-formerr>
@@ -2326,6 +2333,47 @@
       return data;
     }
 
+    /* Remember Client ID + Secret (+ base URL / cluster) in this browser only */
+    var remember = form.querySelector("[data-remember]");
+    var LS_KEY = "acs.creds." + cfg.key;
+    var REMEMBER_FIELDS = ["clientId", "clientSecret", "baseUrl", "cluster"];
+
+    function persistRemembered() {
+      try {
+        if (!remember || !remember.checked) { localStorage.removeItem(LS_KEY); return; }
+        var p = payload(), keep = {};
+        REMEMBER_FIELDS.forEach(function (k) { if (p[k]) keep[k] = p[k]; });
+        localStorage.setItem(LS_KEY, JSON.stringify(keep));
+      } catch (e) { /* private mode / storage disabled */ }
+    }
+
+    function loadRemembered() {
+      if (!remember) return;
+      var saved;
+      try { saved = JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { return; }
+      if (!saved) return;
+      remember.checked = true;
+      Object.keys(saved).forEach(function (name) {
+        var el = form.querySelector('[name="' + name + '"]');
+        if (!el || !saved[name]) return;
+        if (el.tagName === "SELECT") {
+          var known = Array.prototype.some.call(el.options, function (o) { return o.value === saved[name]; });
+          if (known) { el.value = saved[name]; }
+          else {
+            el.value = "__custom__";
+            var cf = form.querySelector('[data-custom-for="' + el.id + '"]');
+            if (cf) { cf.hidden = false; var ci = cf.querySelector("input"); if (ci) ci.value = saved[name]; }
+          }
+        } else {
+          el.value = saved[name];
+        }
+      });
+    }
+
+    if (remember) {
+      remember.addEventListener("change", function () { if (!remember.checked) persistRemembered(); });
+    }
+
     form.addEventListener("submit", function (e) {
       e.preventDefault();
       clearError();
@@ -2337,6 +2385,7 @@
       btn.disabled = true;
       var original = btn.textContent;
       btn.textContent = "Connecting…";
+      persistRemembered();
       api(cfg.connect, { method: "POST", body: JSON.stringify(payload()) })
         .then(function (res) {
           if (!res.ok) { showError(res.body.error || ("Connection failed (" + res.status + ").")); return; }
@@ -2368,6 +2417,7 @@
         .then(function (res) { render((res.body || {})[cfg.key]); });
     });
 
+    loadRemembered();
     cfg._render = render;
   }
 
