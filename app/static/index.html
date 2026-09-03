@@ -947,6 +947,13 @@
               </div>
               <div class="s-sub">Set radio options and push them to selected AP groups</div>
             </button>
+            <button class="statcard" type="button" data-config="group" style="--c:#e0713a">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2.5 5 8 2.5 13.5 5 8 7.5 2.5 5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2.5 8 8 10.5 13.5 8M2.5 11 8 13.5 13.5 11" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span>
+                <span class="s-label">Add AP group</span>
+              </div>
+              <div class="s-sub">Create a new configuration group</div>
+            </button>
           </div>
         </div>
       </div>
@@ -1074,6 +1081,38 @@
           </div>
         </div>
 
+        <!-- Add AP group -->
+        <div id="grp-form" hidden>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="grp-name">Group name <span class="req">*</span></label>
+              <input type="text" id="grp-name" autocomplete="off" placeholder="Branch-01"></div>
+            <div class="field"><label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
+              <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
+                <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
+          </div>
+          <div class="field">
+            <div class="lbl">Device types in this group</div>
+            <label class="chk"><input type="checkbox" class="grp-dev" value="AccessPoints" checked> Access Points</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Gateways"> Gateways</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Switches" id="grp-dev-sw"> Switches</label>
+          </div>
+          <div class="field" id="grp-sw-wrap" hidden>
+            <div class="lbl">Switch types</div>
+            <label class="chk"><input type="checkbox" class="grp-sw" value="AOS_S" checked> AOS-S</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-sw" value="AOS_CX" checked> AOS-CX</label>
+          </div>
+          <div class="field">
+            <label class="lbl" for="grp-aprole">AP network role</label>
+            <select id="grp-aprole"><option>Standard</option><option>Microbranch</option></select>
+          </div>
+          <div class="hint">The group is created with the <strong>ArubaOS-8 / Instant</strong> architecture — Central's API
+            can't set or change it. For an ArubaOS-10 group, create it in the Central UI.</div>
+          <div class="actions" style="margin-top:14px">
+            <button type="button" class="btn" id="grp-create">Create group</button>
+          </div>
+          <div id="grp-results"></div>
+        </div>
+
         <div class="field" id="cf-cli-wrap">
           <label class="lbl" for="cf-cli">CLI configuration <span class="req">*</span></label>
           <textarea id="cf-cli" rows="13" spellcheck="false" wrap="off"></textarea>
@@ -1085,7 +1124,7 @@
           <summary>Generated CLI to be deployed</summary>
           <pre id="cf-cli-view"></pre>
         </details>
-        <div class="cload">
+        <div class="cload" id="cf-cload">
           <button class="linkbtn" type="button" id="cf-reset-tpl">Reset to template</button>
           <span class="cload-sep">·</span>
           <span>Load from</span>
@@ -1095,7 +1134,7 @@
           <span class="cload-note" id="cf-load-note"></span>
         </div>
 
-        <div class="cgroups">
+        <div class="cgroups" id="cf-cgroups">
           <div class="lbl">Deploy to AP groups <span class="req">*</span></div>
           <div class="cgroup-tools">
             <input type="search" id="cgroup-search" placeholder="Filter groups…" autocomplete="off">
@@ -1107,7 +1146,7 @@
 
         <div class="formerr" id="config-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="config-err-msg"></span></div>
 
-        <div class="actions">
+        <div class="actions" id="cf-actions">
           <button type="button" class="btn ghost" id="config-preview">Preview merge</button>
           <button type="button" class="btn" id="config-apply">Deploy</button>
         </div>
@@ -1436,7 +1475,8 @@
           "\n  rfc3576\n  cppm-rfc3576-port 5999\n  rfc5997\n";
       }
     },
-    rf: { title: "Configure RF profile", nameLabel: "" }
+    rf: { title: "Configure RF profile", nameLabel: "" },
+    group: { title: "Add AP group", nameLabel: "" }
   };
 
   function cfgErr(msg) {
@@ -1614,28 +1654,38 @@
     document.getElementById("config-form-title").textContent = m.title;
     var isRadius = kind === "radius";
     var isRf = kind === "rf";
-    var structured = isRadius || isRf;
+    var isGroup = kind === "group";
+    var structured = isRadius || isRf || isGroup;
     document.getElementById("cf-name-wrap").hidden = structured;
     document.getElementById("cf-cli-wrap").hidden = structured;
     document.getElementById("cf-reset-tpl").hidden = structured;
     document.getElementById("rform").hidden = !isRadius;
     document.getElementById("rfp-form").hidden = !isRf;
-    document.getElementById("rf-cli-details").hidden = !structured;
+    document.getElementById("grp-form").hidden = !isGroup;
+    document.getElementById("rf-cli-details").hidden = !(isRadius || isRf);
     document.getElementById("cf-load-name").hidden = false;
+    // the shared deploy machinery is not used for "Add AP group"
+    document.getElementById("cf-cload").hidden = isGroup;
+    document.getElementById("cf-cgroups").hidden = isGroup;
+    document.getElementById("cf-actions").hidden = isGroup;
+    document.getElementById("config-err").hidden = false;
     if (isRadius) { rformDefaults(); rformToCli(); }
     else if (isRf) { rfpDefaults(); rfpToCli(); }
+    else if (isGroup) { grpReset(); }
     else { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     nameEl.value = "";
     if (!structured) applyTemplate();
     resultsEl.innerHTML = "";
+    document.getElementById("grp-results").innerHTML = "";
     cfgErr("");
     overviewInner.hidden = true;
     configForm.hidden = false;
     detailEl.hidden = true;
-    cgroupList.innerHTML = '<p class="cgroup-count">Loading AP groups…</p>';
     document.getElementById("cf-load-note").textContent = "";
     document.getElementById("cf-load-name").innerHTML = '<option value="">— select group —</option>';
     document.getElementById("cf-load-name").disabled = true;
+    if (isGroup) return;
+    cgroupList.innerHTML = '<p class="cgroup-count">Loading AP groups…</p>';
     api("/api/config/" + activeFlavor + "/groups").then(function (res) {
       cfgGroups = (res.ok && res.body.groups) || [];
       renderGroupList("");
@@ -1647,6 +1697,49 @@
       });
     });
   }
+
+  function grpReset() {
+    document.getElementById("grp-name").value = "";
+    document.getElementById("grp-pass").value = "";
+    document.querySelectorAll(".grp-dev").forEach(function (c) { c.checked = c.value === "AccessPoints"; });
+    document.querySelectorAll(".grp-sw").forEach(function (c) { c.checked = true; });
+    document.getElementById("grp-sw-wrap").hidden = true;
+    document.getElementById("grp-aprole").value = "Standard";
+  }
+  document.getElementById("grp-dev-sw").addEventListener("change", function () {
+    document.getElementById("grp-sw-wrap").hidden = !this.checked;
+  });
+  document.getElementById("grp-create").addEventListener("click", function () {
+    cfgErr("");
+    var name = document.getElementById("grp-name").value.trim();
+    var pass = document.getElementById("grp-pass").value;
+    var dev = Array.prototype.map.call(document.querySelectorAll(".grp-dev:checked"), function (c) { return c.value; });
+    var sw = Array.prototype.map.call(document.querySelectorAll(".grp-sw:checked"), function (c) { return c.value; });
+    if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(name)) { cfgErr("Group name: letters, numbers, spaces, . _ - only (max 32)."); return; }
+    if (pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
+    if (!dev.length) { cfgErr("Pick at least one device type."); return; }
+    var out = document.getElementById("grp-results");
+    var btn = this; btn.disabled = true; btn.textContent = "Creating…";
+    out.innerHTML = "";
+    api("/api/config/" + activeFlavor + "/group", {
+      method: "POST",
+      body: JSON.stringify({ name: name, password: pass, devTypes: dev, swTypes: sw, apRole: document.getElementById("grp-aprole").value })
+    }).then(function (res) {
+      if (!res.ok) { cfgErr((res.body && res.body.error) || "Create failed."); return; }
+      var r = res.body;
+      var row = document.createElement("div");
+      row.className = "cres ok";
+      row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
+      row.querySelector(".cr-grp").textContent = r.name;
+      row.querySelector(".cr-msg").textContent = "created — " + r.architecture +
+        (r.propertiesApplied ? "" : " (" + r.note + ")");
+      out.appendChild(row);
+      document.getElementById("grp-name").value = "";
+      document.getElementById("grp-pass").value = "";
+      overviewLoaded[activeFlavor] = false;
+    }).catch(function () { cfgErr("Network error."); })
+      .finally(function () { btn.disabled = false; btn.textContent = "Create group"; });
+  });
   function blockPrefix() {
     return cfgKind === "ssid" ? "wlan ssid-profile"
       : cfgKind === "rf" ? "rf dot11a-radio-profile" : "wlan auth-server";
@@ -2174,8 +2267,38 @@
         groupsEl.appendChild(mbox);
       }
 
+      if ((d.meta || {}).kind === "group" && activeFlavor === "classic") {
+        var dwrap = document.createElement("div");
+        dwrap.style.marginTop = "16px";
+        var db = document.createElement("button");
+        db.type = "button"; db.className = "linkbtn danger";
+        db.textContent = "Delete this AP group";
+        db.addEventListener("click", function () { deleteGroup(d.title, dwrap); });
+        dwrap.appendChild(db);
+        groupsEl.appendChild(dwrap);
+      }
+
       loadTopology(d.meta || {});
     });
+  }
+
+  function deleteGroup(name, wrap) {
+    if (!window.confirm('Delete AP group "' + name + '"?\n\nThis removes the group and all of its configuration in Aruba Central. ' +
+      'Devices in it move to the unprovisioned group. This cannot be undone.')) return;
+    var msg = document.createElement("span");
+    msg.style.cssText = "margin-left:10px;font-size:12px;color:var(--muted)";
+    msg.textContent = "Deleting…";
+    wrap.appendChild(msg);
+    fetch("/api/config/" + activeFlavor + "/group/" + encodeURIComponent(name), {
+      method: "DELETE", headers: { "Accept": "application/json" }
+    }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+      .then(function (res) {
+        if (!res.ok) { msg.textContent = (res.b && res.b.error) || "Delete failed."; msg.style.color = "var(--danger)"; return; }
+        msg.textContent = "Deleted.";
+        overviewLoaded[activeFlavor] = false;
+        setTimeout(function () { entityEl.hidden = true; listEl.hidden = false; fetchDetail(dState.entity); }, 700);
+      })
+      .catch(function () { msg.textContent = "Network error."; msg.style.color = "var(--danger)"; });
   }
   var MEMBER_ICON = { ap: "IndoorAP.svg", switch: "L2-Switch.svg", gateway: "Gateway.svg",
     client: "Mobile-or-Tablet.svg", other: "L2-Switch.svg" };

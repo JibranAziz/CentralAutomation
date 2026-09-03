@@ -337,7 +337,24 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
 (`_cli_drop_block`), merges the rest (`submerge` → `_merge_cli_submerge`, else
 `_merge_cli`), and either returns the merged text (`preview:true`) or POSTs it
 (and `_ap_cli_cache_clear`s the group). `remove`-only (no `cli`) = delete — the
-RF form's "Delete this named profile" button sends `{remove: rfpHeaders()}`. The UI has three cards:
+RF form's "Delete this named profile" button sends `{remove: rfpHeaders()}`.
+
+**Group create / delete** (`config_group_create` / `config_group_delete`,
+verified live 2026-09-03 with the probe endpoint):
+- `POST /api/config/classic/group` `{name, password, devTypes[], swTypes[], apRole}`
+  → `POST /configuration/v1/groups` `{group, group_attributes:{template_group:false,
+  group_password}}` then `PATCH /configuration/v2/groups/{name}/properties`
+  `{properties:{AllowedDevTypes, ApNetworkRole, AllowedSwitchTypes?}}`.
+- `DELETE /api/config/classic/group/{name}` → `DELETE /configuration/v1/groups/{name}`.
+- **Architecture is always Instant / AOS-8** — the `aos10` flag, `Architecture`
+  in the create body, and a properties PATCH all return success but silently
+  no-op. An AOS-10 group must be created in the Central UI. The create form
+  states this.
+- UI: **Add AP group** config card (`#grp-form`, name / password / device-type
+  checkboxes / switch types / AP network role). Delete is a danger button on the
+  AP-group detail page (`openEntity` when `meta.kind === "group"`).
+
+The Configuration section cards:
 - **Configure SSID** — seeds `wlan ssid-profile` + `wlan access-rule` into an
   editable textarea.
 - **Create RADIUS server** — structured `#rform` → `wlan auth-server` block.
