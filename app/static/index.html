@@ -1631,9 +1631,9 @@
     "ssids": { title: "SSIDs", drill: "ssid", idKey: "name", cols: [
       ["name", "SSID"], ["status", "Status"], ["security", "Security"], ["securityLevel", "Type"],
       ["band", "Bands"], ["vlan", "VLAN"], ["clients", "Clients"], ["groups", "AP Groups"]] },
-    "rf-profiles": { title: "RF Profiles", cols: [
+    "rf-profiles": { title: "RF Profiles", drill: "rf", idKey: "name", cols: [
       ["name", "RF Profile"], ["scope", "Scope"], ["radios", "Radios"],
-      ["txpower", "Max TX"], ["chwidth", "Ch. width"], ["groups", "AP Groups"]] },
+      ["txpower", "TX power (5 GHz)"], ["groups", "AP Groups"]] },
     sites: { title: "Sites", drill: "site", idKey: "id", cols: [
       ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
       ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },
