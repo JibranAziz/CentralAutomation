@@ -2190,7 +2190,7 @@ _RF_FLAG_KEYS = ("spectrum-monitor", "smart-antenna", "channel-quality-aware",
                  "very-high-throughput-disable", "high-throughput-disable")
 _RF_VAL_KEYS = ("max-tx-power", "min-tx-power", "max-distance",
                 "free-channel-index", "disable-arm-wids-functions",
-                "csa-count", "high-noise-backoff-time")
+                "csa-count", "high-noise-backoff-time", "zone", "dot11h")
 
 
 def _cli_rf_profiles(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
@@ -2296,11 +2296,14 @@ def _rf_band_group(label: str, s: dict[str, Any]) -> Optional[dict[str, Any]]:
         "maxdist": s.get("max-distance") if s.get("max-distance") not in (None, "0") else None,
         "csa": s.get("csa-count"),
         "noise": (f"{s['high-noise-backoff-time']} min" if s.get("high-noise-backoff-time") else None),
+        "dot11h": "On" if s.get("dot11h") else None,
+        "zone": s.get("zone") if isinstance(s.get("zone"), str) else None,
     }
     return _kv_group(f"{label} radio", src, [
         ("power", "Allowed transmit power"),
         ("width", "Channel width"),
         ("channels", "Allowed channels"),
+        ("dot11h", "Advertise 802.11d/h"),
         ("spectrum", "Spectrum monitor"),
         ("smart", "Smart antenna"),
         ("cqa", "Channel quality aware"),
@@ -2308,6 +2311,7 @@ def _rf_band_group(label: str, s: dict[str, Any]) -> Optional[dict[str, Any]]:
         ("maxdist", "Max distance"),
         ("csa", "CSA count"),
         ("noise", "High-noise backoff"),
+        ("zone", "AP zone"),
     ])
 
 

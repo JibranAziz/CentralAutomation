@@ -345,8 +345,17 @@ it (and `_ap_cli_cache_clear`s the group). The UI has three cards:
   `csa-count`, `high-noise-backoff-time`, `dot11h`, `spectrum-monitor`,
   `channel-quality-aware`, `disable-arm-wids-functions`. Pushes with
   `submerge:true`; `managed` only sent when the "remove unset options" box is
-  ticked. "Load from" pulls the group's three radio-profile blocks into the form.
-  These are the AOS-10 group-default (unnamed) radio profiles.
+  ticked. **Profile name** field: blank → the group-default (unnamed) radio
+  profile; filled → a *named* profile — header becomes
+  `rf …-radio-profile <name>` (quoted iff it has spaces), each block gets a
+  `zone <name>` line (Central's convention — the profile applies to APs whose
+  zone is set to that name), and the 5 GHz column is also written to
+  `rf dot11a-secondary-radio-profile <name>`. "Load from" lists named profiles
+  in the picked group (`?names=rf dot11a-radio-profile`, plus a "group default"
+  entry) and pulls the matching blocks. `_merge_cli_submerge` matches on the
+  full header incl. name, so named and unnamed profiles are edited
+  independently. Verified live (preview) 2026-09-03: new named profile appends
+  cleanly, editing `API_Test` leaves the unnamed default untouched.
 
 All three share the group multi-select, **Preview merge** (exact per-group text)
 and confirm-gated **Deploy**. `GET /api/config/classic/cli/{group}` returns one
