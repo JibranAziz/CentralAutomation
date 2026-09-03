@@ -1002,9 +1002,15 @@
 
         <!-- RF profile: structured per-band form (backend pushes the generated CLI) -->
         <div id="rfp-form" hidden>
-          <div class="hint" style="margin-bottom:10px">Edits each selected group's <strong>default radio profile</strong>
-            (the one Central shows as <em>“default”</em> — it has no separate name).
-            Only the fields you set below are changed — other radio settings in the group are left alone.
+          <div class="field" style="margin-bottom:10px">
+            <label class="lbl" for="rfp-name">Profile name</label>
+            <input type="text" id="rfp-name" autocomplete="off" placeholder="leave blank to edit the group default">
+            <div class="hint">Blank → edits each group's <strong>default</strong> radio profile (the “default” Central shows).
+              Named → creates/edits a named profile (<code>rf …-radio-profile &lt;name&gt;</code> + <code>zone &lt;name&gt;</code>)
+              in each selected group; it applies to APs whose <strong>zone</strong> is set to that name (assign the zone in Central).
+              The 5 GHz settings are also written to the secondary 5 GHz radio.</div>
+          </div>
+          <div class="hint" style="margin-bottom:10px">Only the fields you set below are changed — other radio settings are left alone.
             Clear a field to fall back to Central's regulatory default.</div>
           <div class="tablewrap">
             <table class="rfp-table">
@@ -1513,7 +1519,21 @@
     "csa-count", "high-noise-backoff-time", "dot11h", "spectrum-monitor",
     "channel-quality-aware", "disable-arm-wids-functions"];
   function rfp(id) { return document.getElementById("rfp-" + id); }
+  function rfpName() { return document.getElementById("rfp-name").value.trim(); }
+  function rfpQuote(n) { return /\s/.test(n) ? '"' + n + '"' : n; }
+  function rfpHeaderKinds() {
+    // 3 columns map to these CLI kinds; named profiles also get the secondary 5 GHz radio
+    var k = [["24", "dot11g"], ["5", "dot11a"], ["6", "dot11-6ghz"]];
+    if (rfpName()) k.splice(2, 0, ["5", "dot11a-secondary"]);
+    return k;
+  }
+  function rfpHeaders() {
+    var n = rfpName();
+    var suffix = n ? " " + rfpQuote(n) : "";
+    return rfpHeaderKinds().map(function (kk) { return "rf " + kk[1] + "-radio-profile" + suffix; });
+  }
   function rfpDefaults() {
+    document.getElementById("rfp-name").value = "";
     RFP_BANDS.forEach(function (b) {
       var s = b[0];
       rfp("en-" + s).checked = s !== "6";
@@ -1525,7 +1545,9 @@
   }
   function rfpBlock(s, kind) {
     if (!rfp("en-" + s).checked) return "";
-    var L = ["rf " + kind + "-radio-profile"];
+    var n = rfpName();
+    var L = ["rf " + kind + "-radio-profile" + (n ? " " + rfpQuote(n) : "")];
+    if (n) L.push("  zone " + n);
     var ch = rfp("ch-" + s).value.trim().replace(/\s+/g, ""); if (ch) L.push("  allowed-channels " + ch);
     var mn = rfp("min-" + s).value.trim(); if (mn !== "") L.push("  min-tx-power " + mn);
     var mx = rfp("max-" + s).value.trim(); if (mx !== "") L.push("  max-tx-power " + mx);
@@ -1539,7 +1561,7 @@
     return L.join("\n");
   }
   function rfpToCli() {
-    var blocks = RFP_BANDS.map(function (b) { return rfpBlock(b[0], b[1]); }).filter(Boolean);
+    var blocks = rfpHeaderKinds().map(function (kk) { return rfpBlock(kk[0], kk[1]); }).filter(Boolean);
     cliEl.value = blocks.join("\n") + (blocks.length ? "\n" : "");
     document.getElementById("cf-cli-view").textContent = cliEl.value || "(no bands selected)";
   }
@@ -1550,10 +1572,13 @@
     txt.split("\n").forEach(function (line) {
       var indented = /^\s/.test(line);
       var t = line.trim();
-      var mh = t.match(/^rf (dot11g|dot11a|dot11-6ghz)-radio-profile\b/);
+      var mh = t.match(/^rf (dot11g|dot11a-secondary|dot11a|dot11-6ghz)-radio-profile(?:\s+"?([^"]+)"?)?\s*$/);
       if (mh && !indented) {
-        cur = mh[1] === "dot11g" ? "24" : mh[1] === "dot11a" ? "5" : "6";
-        rfp("en-" + cur).checked = true;
+        var pk = mh[1];
+        cur = pk === "dot11g" ? "24" : pk === "dot11-6ghz" ? "6" : "5";
+        if (pk === "dot11a-secondary") cur = null;   // fold secondary into 5 GHz column, don't re-parse
+        else rfp("en-" + cur).checked = true;
+        if (mh[2]) document.getElementById("rfp-name").value = mh[2].trim();
         return;
       }
       if (!indented) { cur = null; return; }
@@ -1572,7 +1597,7 @@
     });
     rfpToCli();
   }
-  document.querySelectorAll("#rfp-form .rfp").forEach(function (el) {
+  document.querySelectorAll("#rfp-form .rfp, #rfp-name").forEach(function (el) {
     var ev = (el.type === "checkbox" || el.tagName === "SELECT") ? "change" : "input";
     el.addEventListener(ev, rfpToCli);
   });
@@ -1590,7 +1615,7 @@
     document.getElementById("rform").hidden = !isRadius;
     document.getElementById("rfp-form").hidden = !isRf;
     document.getElementById("rf-cli-details").hidden = !structured;
-    document.getElementById("cf-load-name").hidden = isRf;
+    document.getElementById("cf-load-name").hidden = false;
     if (isRadius) { rformDefaults(); rformToCli(); }
     else if (isRf) { rfpDefaults(); rfpToCli(); }
     else { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
@@ -1616,12 +1641,12 @@
       });
     });
   }
-  var RFP_HEADERS = ["rf dot11g-radio-profile", "rf dot11a-radio-profile", "rf dot11-6ghz-radio-profile"];
   function blockPrefix() {
-    return cfgKind === "ssid" ? "wlan ssid-profile" : "wlan auth-server";
+    return cfgKind === "ssid" ? "wlan ssid-profile"
+      : cfgKind === "rf" ? "rf dot11a-radio-profile" : "wlan auth-server";
   }
   function blockHeaders(name) {
-    if (cfgKind === "rf") return RFP_HEADERS;
+    if (cfgKind === "rf") return rfpHeaders();
     var n = (name || nameEl.value).trim();
     if (!n) return [];
     return cfgKind === "ssid"
@@ -1639,6 +1664,16 @@
         "?names=" + encodeURIComponent(blockPrefix())).then(function (res) {
       var list = (res.ok && res.body.names) || [];
       nameSel.innerHTML = "";
+      if (cfgKind === "rf") {
+        var od = document.createElement("option"); od.value = ""; od.textContent = "group default";
+        nameSel.appendChild(od);
+        list.forEach(function (n) {
+          var o = document.createElement("option"); o.value = n; o.textContent = n;
+          nameSel.appendChild(o);
+        });
+        nameSel.disabled = false;
+        return;
+      }
       if (!list.length) {
         nameSel.innerHTML = '<option value="">none in ' + g + '</option>';
         return;
@@ -1683,7 +1718,7 @@
   document.getElementById("config-back").addEventListener("click", closeConfig);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
   document.getElementById("cf-load-group").addEventListener("change", function () {
-    if (cfgKind !== "rf") loadNamesForGroup(this.value);
+    loadNamesForGroup(this.value);
   });
   document.getElementById("cf-load").addEventListener("click", function () {
     var note = document.getElementById("cf-load-note");
@@ -1691,13 +1726,21 @@
     if (!g) { note.textContent = "Pick a group."; return; }
 
     if (cfgKind === "rf") {
+      var pn = document.getElementById("cf-load-name").value.trim();
+      var sfx = pn ? " " + (/\s/.test(pn) ? '"' + pn + '"' : pn) : "";
+      var heads = ["dot11g", "dot11a-secondary", "dot11a", "dot11-6ghz"].map(function (k) {
+        return "rf " + k + "-radio-profile" + sfx;
+      });
       note.textContent = "Loading…";
       api("/api/config/" + activeFlavor + "/cli/" + encodeURIComponent(g) +
-          "?block=" + encodeURIComponent(RFP_HEADERS.join("||"))).then(function (res) {
+          "?block=" + encodeURIComponent(heads.join("||"))).then(function (res) {
         if (!res.ok) { note.textContent = (res.body && res.body.error) || "Read failed."; return; }
-        if (!res.body.cli) { note.textContent = "No radio profile found in " + g + "."; return; }
+        if (!res.body.cli) {
+          note.textContent = (pn ? '"' + pn + '" not found in ' : "No radio profile in ") + g + ".";
+          return;
+        }
         fillRfpFromCli(res.body.cli);
-        note.textContent = "Loaded radio profile from " + g + ".";
+        note.textContent = "Loaded " + (pn || "group default") + " from " + g + ".";
       }).catch(function () { note.textContent = "Network error."; });
       return;
     }
@@ -1744,6 +1787,9 @@
     }
     if (cfgKind === "rf") {
       rfpToCli();
+      if (rfpName() && !/^[A-Za-z0-9 _.-]{1,32}$/.test(rfpName())) {
+        cfgErr("Profile name: letters, numbers, spaces, . _ - only (max 32)."); return;
+      }
       if (!RFP_BANDS.some(function (b) { return rfp("en-" + b[0]).checked; })) {
         cfgErr("Select at least one band to configure."); return;
       }
