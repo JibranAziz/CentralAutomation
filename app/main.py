@@ -1069,12 +1069,13 @@ def _group_names_from(items: Any) -> list[str]:
 
 
 async def _retry_get(client: httpx.AsyncClient, url: str, headers: dict[str, str],
-                     params: Optional[dict[str, Any]] = None, tries: int = 3):
+                     params: Optional[dict[str, Any]] = None, tries: int = 3,
+                     retry_on: tuple[int, ...] = (429, 500, 502, 503, 504)):
     r = None
     for i in range(tries):
         try:
             r = await client.get(url, headers=headers, params=params or {})
-            if r.status_code == 200 or r.status_code not in (429, 500, 502, 503, 504):
+            if r.status_code == 200 or r.status_code not in retry_on:
                 return r
         except Exception:
             r = None
@@ -1385,7 +1386,7 @@ async def _classic_ssid_map(host: str, token: str) -> dict[str, dict[str, Any]]:
 
         async def _grp(g: str) -> tuple[str, list[tuple[str, str, str]], dict[str, dict[str, Any]]]:
           async with sem:
-            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, tries=1)
+            clis, _csc, _cm = await _ap_cli_get(client, host, headers, g, sweep=True)
             cfg = _cli_ssid_cfg(clis)
             for path in (f"/configuration/v1/wlan/{quote(g, safe='')}",
                          f"/configuration/v2/wlan/{quote(g, safe='')}"):
@@ -1968,15 +1969,17 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
 
 
 async def _ap_cli_get(cx: httpx.AsyncClient, host: str, hdr: dict[str, str], group: str,
-                      tries: int = 3) -> tuple[Optional[list[str]], int, str]:
+                      tries: int = 3, sweep: bool = False) -> tuple[Optional[list[str]], int, str]:
     """Read a group's full AP CLI config.
 
-    Gateway/switch-only groups return a deterministic 500 here — callers that
-    sweep every group should pass a low ``tries`` to avoid wasted retries.
+    Gateway/switch-only groups return a deterministic 500 here. Callers that
+    sweep every group pass ``sweep=True`` so we still retry rate-limits /
+    502-504 but not the 500, avoiding wasted retries on non-AP groups.
     """
+    retry_on = (429, 502, 503, 504) if sweep else (429, 500, 502, 503, 504)
     for path in (f"/configuration/v1/ap_cli/{quote(group, safe='')}",
                  f"/configuration/v2/ap_cli/{quote(group, safe='')}"):
-        r = await _retry_get(cx, f"https://{host}{path}", hdr, tries=tries)
+        r = await _retry_get(cx, f"https://{host}{path}", hdr, tries=tries, retry_on=retry_on)
         if r is None:
             return None, 0, "request failed"
         if r.status_code == 404:
@@ -2150,7 +2153,7 @@ async def _classic_rf_profiles(host: str, token: str) -> Optional[dict[str, dict
 
         async def _grp(g: str) -> tuple[str, dict[str, dict[str, Any]]]:
             async with sem:
-                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, tries=1)
+                clis, _sc2, _m = await _ap_cli_get(client, host, headers, g, sweep=True)
                 return g, _cli_rf_profiles(clis)
 
         for g, prof in await asyncio.gather(*[_grp(n) for n in names]):
