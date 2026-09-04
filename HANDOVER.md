@@ -46,11 +46,14 @@ Browser ──HTTPS──> nginx (terminates TLS) ──proxy──> 127.0.0.1:8
 
 ## Deploy
 
+**End-user step-by-step (install git → clone → run) is in [README.md](README.md).**
+This section is the engineering summary.
+
 The repo ships a **self-signed TLS** path so it installs on any hostname or bare
 IP with no DNS and no public CA. On Debian/Ubuntu, from the repo root:
 
 ```bash
-sudo apt install -y python3-venv nginx openssl rsync
+sudo apt install -y git python3-venv nginx openssl rsync curl
 sudo ./deploy/install.sh <hostname-or-IP>        # e.g. central.lan  or  192.168.1.50
 ```
 
