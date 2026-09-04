@@ -251,12 +251,12 @@ call and to the per-flavor `overviewLoaded` flag. Nothing else in the drill-down
   - Classic device/client items carry a site *name* (or `site_id` on switches);
     `_classic_resolve_site_id` maps name → numeric id via `/central/v2/sites`.
   - client/device/site detail: found by scanning the list responses.
-  - **AP Groups** (Classic-only card — New Central has no groups concept):
-    `GET /configuration/v2/groups` (`data` = list of `["name"]` or `{group}`,
-    `limit` caps at 20 → paginate); per-group AP/switch/gateway counts derived
-    from the monitoring lists by `group_name`; detail adds
+  - **AP Groups** (`GET /configuration/v2/groups` — `data` = list of `["name"]`
+    or `{group}`, `limit` caps at 20 → paginate); per-group AP/switch/gateway
+    counts derived from the monitoring lists by `group_name`; detail adds
     `GET /configuration/v2/groups/{name}/properties`
     (`data[0].properties`: Architecture, AOSVersion, ApNetworkRole, …).
+    New Central has its own equivalent (see below).
 - AOS-8 Instant APs with no site assignment return an empty siteId → their
   topology section shows "unavailable" (expected).
 - Classic topology drops generic placeholder nodes by name (`inet`, `wifi-sta`,
@@ -294,6 +294,49 @@ call and to the per-flavor `overviewLoaded` flag. Nothing else in the drill-down
 - Subscriptions: `GET https://global.api.greenlake.hpe.com/subscriptions/v1/subscriptions`
   (offset/limit, **max limit 200**) → `total`. Works with the same Central
   client-credentials token.
+
+#### New Central — configuration model (`/network-config/v1alpha1`)
+
+Verified against a live tenant. The config model is **library profiles**
+(named, reusable, per resource type) + **config-assignments** (attach a profile
+to a *scope* / device-function). Helpers: `_nc_get(client, host, hdr, root, params)`.
+
+- `GET /network-config/v1/global` → `{scopeId}`; `GET /network-config/v1/sites`
+  → sites with `scopeId`.
+- `GET /network-config/v1alpha1/device-collections` → **AP Groups** for New
+  Central: `items[]` of `{scopeId, scopeName, deviceCount, isIap8x, description}`
+  (`_new_central_ap_groups` / `_nc_group_row`). Drill-down
+  (`_new_central_group_detail`, ident = `scopeId`) shows architecture + device
+  count, then the assigned profiles grouped by `device-function` → `profile-type`
+  (from `config-assignments?scope-id=…`). Monitoring devices carry no
+  device-collection ref, so member devices aren't listed.
+- `GET /network-config/v1alpha1/radios` → **RF Profiles**: `profile[]` of
+  `{name, radio:[{profile: RADIO_2DOT4G|RADIO_5G|RADIO_2ND_5G|RADIO_6G|RADIO_2ND_6GHZ,
+  mode, enable, ieee802dot11h, arm-control:{channels-for-*, min/max-channel-bandwidth
+  (BW_20MHZ…), min/max-tx-power, zero-wait-dfs}}]}` (`_new_central_rf_list` /
+  `_nc_rf_row`). Drill-down `_new_central_rf_detail`: one `_kv_group` per radio
+  with power / width (`_nc_width`) / channels (`_nc_chan_list`, strips `CHAN_`
+  and `_6GHZ`) / flags, plus "Assigned to" from `config-assignments?profile-type=radios`.
+- `GET /network-config/v1alpha1/wlan-ssids` → SSID library profiles
+  (`{wlan-ssid:[{ssid, enable, essid.name, forward-mode, dot11k/r, …}]}`).
+- `GET /network-config/v1alpha1/auth-servers` → RADIUS servers
+  (`{auth-server:[{name, type:RADIUS, radius-server-mode, auth-server-address,
+  auth-port, enable-radsec, …}]}`); `.../server-groups` → RADIUS server groups.
+- `GET /network-config/v1alpha1/roles` → access-rule roles.
+- `GET /network-config/v1alpha1/config-assignments` →
+  `{config-assignment:[{scope-id, device-function (CAMPUS_AP / MOBILITY_GW /
+  ACCESS_SWITCH / …), profile-type, profile-instance, scope-name, scope-type}]}`;
+  filter with `?scope-id=` / `?profile-type=` / `?device-function=`. Assign via
+  `POST` the same path `{config-assignment:[{scope-id, device-function,
+  profile-type, profile-instance}]}`; unassign via
+  `DELETE /network-config/v1alpha1/config-assignments/{scopeId}/{deviceFunction}/{profileType}/{profileInstance}`.
+- **AP Groups + RF Profiles overview cards now show for both flavors** —
+  `NEW_ONLY_HIDE` is `{}`; the two cards no longer carry `data-flavor="classic"`.
+  Frontend `curDef()` resolves a `DETAIL` entry's `byFlavor.<flavor>` override
+  (New AP-groups list has different columns / idKey than Classic).
+- **Config *writes* for New Central (SSID / RADIUS / RF profile / Add group) are
+  NOT built yet** — Phase 2. The write path is `PUT`/`POST` to the
+  `/network-config/v1alpha1/<type>` resource + a `config-assignment`.
 
 ## Topology view (frontend)
 
