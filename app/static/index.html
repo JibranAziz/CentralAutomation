@@ -1153,6 +1153,148 @@
         <div id="config-results"></div>
       </div>
 
+      <!-- New Central configuration (network-config library profiles) -->
+      <div id="nc-config-section" hidden>
+        <div class="panel-head" style="margin-top:26px">Configuration</div>
+        <div class="statgrid">
+          <button class="statcard" type="button" data-ncconfig="ssid" style="--c:#0ea5e9">
+            <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="12" r="1.6" fill="currentColor"/><path d="M4.5 9.5a5 5 0 0 1 7 0M2 7a8.5 8.5 0 0 1 12 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="s-label">Configure SSID</span></div>
+            <div class="s-sub">Create a WLAN SSID profile and assign it to AP groups</div>
+          </button>
+          <button class="statcard" type="button" data-ncconfig="radius" style="--c:#8b5cf6">
+            <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13 3.4v4c0 3.3-2.1 5.3-5 6.1-2.9-.8-5-2.8-5-6.1v-4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 7.8 7.4 9.2 10.2 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="s-label">Create RADIUS server</span></div>
+            <div class="s-sub">Add a RADIUS authentication server</div>
+          </button>
+          <button class="statcard" type="button" data-ncconfig="rf" style="--c:#0369a1">
+            <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 8v0M5.2 5.2a4 4 0 0 0 0 5.6M10.8 10.8a4 4 0 0 0 0-5.6M3 3a7 7 0 0 0 0 10M13 13A7 7 0 0 0 13 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/></svg></span><span class="s-label">Configure RF profile</span></div>
+            <div class="s-sub">Create a radio profile and assign it to AP groups</div>
+          </button>
+        </div>
+        <div class="hint" style="margin-top:8px">Adding AP groups (device collections) isn't available through the API on this cluster type — create those in the Central UI.</div>
+      </div>
+
+      <div id="nc-config-form" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="ncf-back">← Account Overview</button>
+          <span class="panel-head" id="ncf-title" style="margin:0">Configure SSID</span>
+        </div>
+
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="ncf-name">Name <span class="req">*</span></label>
+            <input type="text" id="ncf-name" autocomplete="off"></div>
+        </div>
+
+        <!-- SSID -->
+        <div class="ncf-grp" data-for="ssid" hidden>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-s-opmode">Security</label>
+              <select id="ncf-s-opmode">
+                <option value="OPEN">Open</option>
+                <option value="ENHANCED_OPEN">Enhanced Open (OWE)</option>
+                <option value="WPA2_PERSONAL">WPA2 Personal (PSK)</option>
+                <option value="WPA3_PERSONAL">WPA3 Personal (SAE)</option>
+                <option value="WPA2_ENTERPRISE">WPA2 Enterprise</option>
+                <option value="WPA3_ENTERPRISE_CCM_128">WPA3 Enterprise</option>
+              </select></div>
+            <div class="field"><label class="lbl" for="ncf-s-type">Type</label>
+              <select id="ncf-s-type"><option value="EMPLOYEE">Employee</option><option value="GUEST">Guest</option></select></div>
+          </div>
+          <div class="field-row" id="ncf-s-psk-wrap" hidden>
+            <div class="field"><label class="lbl" for="ncf-s-pass">Passphrase <span class="req">*</span></label>
+              <div class="secret"><input type="password" id="ncf-s-pass" autocomplete="new-password">
+                <button type="button" class="reveal" data-reveal="ncf-s-pass" aria-label="Show"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
+          </div>
+          <div class="field-row" id="ncf-s-eap-wrap" hidden>
+            <div class="field"><label class="lbl" for="ncf-s-asg">Auth server group</label>
+              <input type="text" id="ncf-s-asg" data-mono placeholder="existing server-group name"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-s-vlan">VLAN</label>
+              <input type="text" id="ncf-s-vlan" data-mono value="1"></div>
+            <div class="field"><label class="lbl" for="ncf-s-band">RF band</label>
+              <select id="ncf-s-band"><option value="BAND_ALL">All</option><option value="24GHZ">2.4 GHz</option><option value="5GHZ">5 GHz</option><option value="6GHZ">6 GHz</option></select></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-s-fwd">Forwarding</label>
+              <select id="ncf-s-fwd"><option value="FORWARD_MODE_BRIDGE">Bridge</option><option value="FORWARD_MODE_L2_TUNNEL">Tunnel (L2)</option></select></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="ncf-s-hidden"> Hide SSID</label>
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ncf-s-macauth"> MAC authentication</label>
+        </div>
+
+        <!-- RADIUS -->
+        <div class="ncf-grp" data-for="radius" hidden>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-r-addr">IP address / FQDN <span class="req">*</span></label>
+              <input type="text" id="ncf-r-addr" data-mono></div>
+            <div class="field"><label class="lbl" for="ncf-r-mode">Mode</label>
+              <select id="ncf-r-mode"><option value="AUTH_AND_COA">Auth + CoA</option><option value="AUTH_ONLY">Auth only</option><option value="AUTH_AND_ACCOUNTING">Auth + Accounting</option></select></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-r-authport">Auth port</label><input type="text" id="ncf-r-authport" data-mono value="1812"></div>
+            <div class="field"><label class="lbl" for="ncf-r-acctport">Accounting port</label><input type="text" id="ncf-r-acctport" data-mono value="1813"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="ncf-r-secret">Shared secret <span class="req">*</span></label>
+              <div class="secret"><input type="password" id="ncf-r-secret" autocomplete="new-password">
+                <button type="button" class="reveal" data-reveal="ncf-r-secret" aria-label="Show"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="ncf-r-dynauth" checked> Dynamic authorization (CoA / RFC 3576)</label>
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ncf-r-radsec"> RadSec (RADIUS over TLS)</label>
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ncf-r-msgauth"> Require Message-Authenticator</label>
+        </div>
+
+        <!-- RF profile -->
+        <div class="ncf-grp" data-for="rf" hidden>
+          <div class="hint" style="margin-bottom:8px">Set the radios you want; leave a field blank to keep the Central default.</div>
+          <div class="tablewrap"><table class="rfp-table">
+            <thead><tr><th>Option</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz</th></tr></thead>
+            <tbody>
+              <tr><td>Include this radio</td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-en-2" checked></td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-en-5" checked></td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-en-6"></td></tr>
+              <tr><td>Min TX power (dBm)</td>
+                <td><input type="number" class="ncrf" id="ncrf-minp-2"></td>
+                <td><input type="number" class="ncrf" id="ncrf-minp-5"></td>
+                <td><input type="number" class="ncrf" id="ncrf-minp-6"></td></tr>
+              <tr><td>Max TX power (dBm)</td>
+                <td><input type="number" class="ncrf" id="ncrf-maxp-2"></td>
+                <td><input type="number" class="ncrf" id="ncrf-maxp-5"></td>
+                <td><input type="number" class="ncrf" id="ncrf-maxp-6"></td></tr>
+              <tr><td>Min channel width</td>
+                <td><select class="ncrf" id="ncrf-minbw-2"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option></select></td>
+                <td><select class="ncrf" id="ncrf-minbw-5"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option><option>BW_80MHZ</option><option>BW_160MHZ</option></select></td>
+                <td><select class="ncrf" id="ncrf-minbw-6"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option><option>BW_80MHZ</option><option>BW_160MHZ</option></select></td></tr>
+              <tr><td>Max channel width</td>
+                <td><select class="ncrf" id="ncrf-maxbw-2"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option></select></td>
+                <td><select class="ncrf" id="ncrf-maxbw-5"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option><option>BW_80MHZ</option><option>BW_160MHZ</option></select></td>
+                <td><select class="ncrf" id="ncrf-maxbw-6"><option value="">—</option><option>BW_20MHZ</option><option>BW_40MHZ</option><option>BW_80MHZ</option><option>BW_160MHZ</option></select></td></tr>
+              <tr><td>Allowed channels</td>
+                <td><input type="text" class="ncrf" id="ncrf-ch-2" data-mono placeholder="1,6,11"></td>
+                <td><input type="text" class="ncrf" id="ncrf-ch-5" data-mono placeholder="36,40,44,…"></td>
+                <td><input type="text" class="ncrf" id="ncrf-ch-6" data-mono placeholder="1,5,9,…"></td></tr>
+              <tr><td>802.11h</td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-11h-2"></td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-11h-5"></td>
+                <td><input type="checkbox" class="ncrf" id="ncrf-11h-6"></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+
+        <div class="cgroups" style="margin-top:14px">
+          <div class="lbl">Assign to AP groups (optional)</div>
+          <div class="cgroup-list" id="ncf-scopes"></div>
+          <div class="hint">The profile is always created in the library. Assigning it to a group also attaches it there
+            (device function: Campus AP) — this can fail if the group already has a profile of that kind, or (for SSIDs)
+            needs a matching role; the create still succeeds and you can finish the assignment in the Central UI.</div>
+        </div>
+
+        <div class="formerr" id="ncf-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="ncf-err-msg"></span></div>
+        <div class="actions"><button type="button" class="btn" id="ncf-create">Create</button></div>
+        <div id="ncf-results"></div>
+      </div>
+
       <div id="dash-detail" hidden>
         <div class="detail-bar">
           <button class="linkbtn" type="button" id="detail-back">← Account Overview</button>
@@ -1338,7 +1480,9 @@
       c.hidden = !!only && only !== flavor;
     });
     document.getElementById("config-section").hidden = flavor !== "classic";
+    document.getElementById("nc-config-section").hidden = flavor !== "new";
     closeConfig();
+    closeNcConfig();
   }
 
   function updateDashboards() {
@@ -2001,6 +2145,130 @@
       .finally(function () { btn.disabled = false; btn.textContent = "Delete this named profile from the selected groups"; });
   });
 
+  /* ---- New Central configuration ---- */
+  var ncKind = null;
+  var NCF_TITLE = { ssid: "Configure SSID", radius: "Create RADIUS server", rf: "Configure RF profile" };
+  var ncSection = document.getElementById("nc-config-section");
+  var ncForm = document.getElementById("nc-config-form");
+  function ncErr(m) {
+    document.getElementById("ncf-err-msg").textContent = m || "";
+    document.getElementById("ncf-err").classList.toggle("on", !!m);
+  }
+  function closeNcConfig() { ncForm.hidden = true; ncSection.hidden = activeFlavor !== "new"; ncKind = null; }
+  function nc(id) { return document.getElementById("ncf-" + id); }
+
+  function openNcConfig(kind) {
+    ncKind = kind;
+    document.getElementById("ncf-title").textContent = NCF_TITLE[kind];
+    ncForm.hidden = false;
+    ncSection.hidden = true;
+    overviewInner.hidden = true;
+    detailEl.hidden = true;
+    ncErr("");
+    document.getElementById("ncf-results").innerHTML = "";
+    nc("name").value = "";
+    ncForm.querySelectorAll(".ncf-grp").forEach(function (g) {
+      g.hidden = g.getAttribute("data-for") !== kind;
+    });
+    syncSsidMode();
+    var box = document.getElementById("ncf-scopes");
+    box.innerHTML = '<p class="cgroup-count">Loading AP groups…</p>';
+    api("/api/config/new/scopes").then(function (res) {
+      var sc = (res.ok && res.body.scopes) || [];
+      box.innerHTML = "";
+      if (!sc.length) { box.innerHTML = '<p class="cgroup-count">No AP groups.</p>'; return; }
+      sc.forEach(function (s) {
+        var l = document.createElement("label");
+        var cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "ncsc"; cb.value = s.id;
+        l.appendChild(cb); l.appendChild(document.createTextNode(s.name));
+        box.appendChild(l);
+      });
+    });
+  }
+  function syncSsidMode() {
+    var m = document.getElementById("ncf-s-opmode").value;
+    document.getElementById("ncf-s-psk-wrap").hidden = !/PERSONAL|SAE|PSK/.test(m);
+    document.getElementById("ncf-s-eap-wrap").hidden = m.indexOf("ENTERPRISE") === -1;
+  }
+  document.getElementById("ncf-s-opmode").addEventListener("change", syncSsidMode);
+
+  function ncFields() {
+    var f = { name: nc("name").value.trim() };
+    if (ncKind === "ssid") {
+      f.opmode = document.getElementById("ncf-s-opmode").value;
+      f.type = document.getElementById("ncf-s-type").value;
+      f.passphrase = document.getElementById("ncf-s-pass").value;
+      f.authServerGroup = document.getElementById("ncf-s-asg").value.trim();
+      f.vlan = document.getElementById("ncf-s-vlan").value.trim() || "1";
+      f.rfBand = document.getElementById("ncf-s-band").value;
+      f.forwardMode = document.getElementById("ncf-s-fwd").value;
+      f.hidden = document.getElementById("ncf-s-hidden").checked;
+      f.macAuth = document.getElementById("ncf-s-macauth").checked;
+    } else if (ncKind === "radius") {
+      f.address = document.getElementById("ncf-r-addr").value.trim();
+      f.mode = document.getElementById("ncf-r-mode").value;
+      f.authPort = document.getElementById("ncf-r-authport").value.trim() || "1812";
+      f.acctPort = document.getElementById("ncf-r-acctport").value.trim() || "1813";
+      f.secret = document.getElementById("ncf-r-secret").value;
+      f.dynAuth = document.getElementById("ncf-r-dynauth").checked;
+      f.radsec = document.getElementById("ncf-r-radsec").checked;
+      f.msgAuth = document.getElementById("ncf-r-msgauth").checked;
+    } else if (ncKind === "rf") {
+      var MAP = { "2": "RADIO_2DOT4G", "5": "RADIO_5G", "6": "RADIO_6G" };
+      f.radios = [];
+      ["2", "5", "6"].forEach(function (b) {
+        if (!document.getElementById("ncrf-en-" + b).checked) return;
+        f.radios.push({
+          profile: MAP[b],
+          minPower: document.getElementById("ncrf-minp-" + b).value.trim(),
+          maxPower: document.getElementById("ncrf-maxp-" + b).value.trim(),
+          minBw: document.getElementById("ncrf-minbw-" + b).value,
+          maxBw: document.getElementById("ncrf-maxbw-" + b).value,
+          channels: document.getElementById("ncrf-ch-" + b).value.trim(),
+          dot11h: document.getElementById("ncrf-11h-" + b).checked,
+          enable: true,
+        });
+      });
+    }
+    return f;
+  }
+
+  document.querySelectorAll("[data-ncconfig]").forEach(function (b) {
+    b.addEventListener("click", function () { openNcConfig(b.getAttribute("data-ncconfig")); });
+  });
+  document.getElementById("ncf-back").addEventListener("click", closeNcConfig);
+  document.getElementById("ncf-create").addEventListener("click", function () {
+    ncErr("");
+    var f = ncFields();
+    if (!/^[A-Za-z0-9 _.\-]{1,64}$/.test(f.name)) { ncErr("Name: letters, numbers, spaces, . _ - only."); return; }
+    if (ncKind === "ssid" && !document.getElementById("ncf-s-psk-wrap").hidden && !f.passphrase) {
+      ncErr("Passphrase is required for this security mode."); return;
+    }
+    if (ncKind === "radius" && !f.address) { ncErr("RADIUS server address is required."); return; }
+    if (ncKind === "radius" && !f.secret) { ncErr("Shared secret is required."); return; }
+    if (ncKind === "rf" && !f.radios.length) { ncErr("Include at least one radio."); return; }
+    var scopes = Array.prototype.map.call(document.querySelectorAll("#ncf-scopes .ncsc:checked"),
+      function (c) { return c.value; });
+    var btn = this; btn.disabled = true; btn.textContent = "Creating…";
+    var out = document.getElementById("ncf-results"); out.innerHTML = "";
+    api("/api/config/new/" + ncKind, { method: "POST", body: JSON.stringify({ fields: f, scopes: scopes }) })
+      .then(function (res) {
+        if (!res.ok && !(res.body && res.body.results)) { ncErr((res.body && res.body.error) || "Request failed."); return; }
+        (res.body.results || []).forEach(function (r) {
+          var row = document.createElement("div");
+          row.className = "cres " + (r.ok ? "ok" : "bad");
+          row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
+          row.querySelector(".cr-grp").textContent = r.step;
+          row.querySelector(".cr-msg").textContent = r.ok ? "ok" : ("failed (" + r.status + ") " + (r.error || "")).trim();
+          out.appendChild(row);
+        });
+        if (res.body.ok) { overviewLoaded.new = false; }
+      })
+      .catch(function () { ncErr("Network error."); })
+      .finally(function () { btn.disabled = false; btn.textContent = "Create"; });
+  });
+
   /* ---- drill-down ---- */
   var DEV_COLS = [["name", "Name"], ["status", "Status"], ["ip", "IPv4"], ["model", "Model"],
     ["serial", "Serial"], ["mac", "MAC"], ["clients", "Clients"], ["firmware", "Firmware"], ["site", "Site"]];
@@ -2302,19 +2570,43 @@
         groupsEl.appendChild(mbox);
       }
 
-      if ((d.meta || {}).kind === "group" && activeFlavor === "classic") {
-        var dwrap = document.createElement("div");
-        dwrap.style.marginTop = "16px";
-        var db = document.createElement("button");
-        db.type = "button"; db.className = "linkbtn danger";
-        db.textContent = "Delete this AP group";
-        db.addEventListener("click", function () { deleteGroup(d.title, dwrap); });
-        dwrap.appendChild(db);
-        groupsEl.appendChild(dwrap);
+      var mk = (d.meta || {}).kind;
+      if (mk === "group" && activeFlavor === "classic") {
+        groupsEl.appendChild(dangerRow("Delete this AP group", function (w) { deleteGroup(d.title, w); }));
+      } else if (activeFlavor === "new" && (mk === "ssid" || mk === "rf")) {
+        groupsEl.appendChild(dangerRow(
+          "Delete this " + (mk === "ssid" ? "SSID profile" : "RF profile"),
+          function (w) { deleteNcProfile(mk, d.title, w); }));
       }
 
       loadTopology(d.meta || {});
     });
+  }
+
+  function dangerRow(label, fn) {
+    var w = document.createElement("div");
+    w.style.marginTop = "16px";
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "linkbtn danger"; b.textContent = label;
+    b.addEventListener("click", function () { fn(w); });
+    w.appendChild(b);
+    return w;
+  }
+  function deleteNcProfile(kind, name, wrap) {
+    if (!window.confirm('Delete "' + name + '" and remove all its assignments?\nThis cannot be undone.')) return;
+    var msg = document.createElement("span");
+    msg.style.cssText = "margin-left:10px;font-size:12px;color:var(--muted)";
+    msg.textContent = "Deleting…"; wrap.appendChild(msg);
+    fetch("/api/config/new/" + kind + "/" + encodeURIComponent(name), {
+      method: "DELETE", headers: { "Accept": "application/json" }
+    }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+      .then(function (res) {
+        if (!res.ok) { msg.textContent = (res.b && res.b.error) || "Delete failed."; msg.style.color = "var(--danger)"; return; }
+        msg.textContent = "Deleted.";
+        overviewLoaded.new = false;
+        setTimeout(function () { entityEl.hidden = true; listEl.hidden = false; if (dState.entity) fetchDetail(dState.entity); }, 700);
+      })
+      .catch(function () { msg.textContent = "Network error."; msg.style.color = "var(--danger)"; });
   }
 
   function deleteGroup(name, wrap) {

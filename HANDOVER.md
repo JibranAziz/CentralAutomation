@@ -334,9 +334,34 @@ to a *scope* / device-function). Helpers: `_nc_get(client, host, hdr, root, para
   `NEW_ONLY_HIDE` is `{}`; the two cards no longer carry `data-flavor="classic"`.
   Frontend `curDef()` resolves a `DETAIL` entry's `byFlavor.<flavor>` override
   (New AP-groups list has different columns / idKey than Classic).
-- **Config *writes* for New Central (SSID / RADIUS / RF profile / Add group) are
-  NOT built yet** — Phase 2. The write path is `PUT`/`POST` to the
-  `/network-config/v1alpha1/<type>` resource + a `config-assignment`.
+
+#### New Central — configuration *writes*
+
+Library-profile CRUD (all verified live 2026-09-04):
+- **create / update:** `PUT /network-config/v1alpha1/<type>/<name>` with the
+  resource JSON → `200 SUCC_001`. `<type>` ∈ `wlan-ssids` / `auth-servers` /
+  `radios`. `NC_KIND_TYPE` maps the UI kind → resource type; `_nc_ssid_body` /
+  `_nc_radius_body` / `_nc_rf_body` build the payload from the form fields.
+  Secrets are written `{secret-type: PLAIN_TEXT, plaintext-value: …}` and read
+  back as opaque `vault:v6:…`.
+- **delete:** `DELETE /network-config/v1alpha1/<type>/<name>` (`nc_config_delete`
+  first `DELETE`s any `config-assignments` for that profile).
+- **assign:** `POST /network-config/v1alpha1/config-assignments`
+  `{config-assignment:[{scope-id, device-function: CAMPUS_AP, profile-type,
+  profile-instance}]}`. **Best-effort** — Central often rejects it:
+  `radios` = "single instance per scope" (a group already has one),
+  `wlan-ssids` = needs a matching `aruba-role`. The library-profile create
+  always succeeds regardless; the per-scope assign result is reported and the
+  user finishes assignment in the Central UI.
+- **Add AP group is NOT possible** on this cluster — `POST
+  /network-config/v1alpha1/device-collections` → `API_ACCESS_RESTRICTED_IN_HYBRID_CLUSTER`;
+  no per-name PUT. So the New Central config section has **3 cards** (SSID /
+  RADIUS / RF), not 4, with a hint to make groups in the UI.
+- Endpoints: `POST /api/config/new/{ssid|radius|rf}` `{fields, scopes[]}`,
+  `DELETE /api/config/new/{kind}/{name}`, `GET /api/config/new/scopes`.
+- UI: separate `#nc-config-section` / `#nc-config-form` (shown when
+  `activeFlavor === "new"`); delete is a danger button on the New Central SSID
+  and RF-profile detail pages (`dangerRow` / `deleteNcProfile`).
 
 ## Topology view (frontend)
 
