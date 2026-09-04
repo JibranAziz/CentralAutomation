@@ -7,6 +7,23 @@ _Last updated: 2026-09-03_
 
 ---
 
+## Change workflow (read first)
+
+Every change ships to **both** places, and updates **both** docs — separately:
+
+1. **Code** → commit to the repo **and** deploy to the running server.
+2. **Docs** → this file (`HANDOVER.md`, committed) stays **generic** — no domain,
+   host, IP, tenant, cert-provider or credential specifics ever go here.
+   Anything specific to a particular deployment goes in `HANDOVER.local.md`
+   (gitignored via `*.local.md`), which is maintained on the operator's side and
+   **never committed**.
+3. `README.md` is the end-user install guide — keep it generic too.
+
+So a single change can touch: the code, `HANDOVER.md`, `HANDOVER.local.md`, and
+`README.md` — update each that's affected.
+
+---
+
 ## What this is
 
 A web GUI (no auth, no database) where a user pastes their own Aruba Central API
@@ -72,6 +89,23 @@ Open `https://<host>/` and accept the self-signed warning once.
   nginx ≥ 1.25.
 - HSTS is intentionally **not** set in `deploy/nginx.conf` (it would lock a host
   out of plain HTTP permanently, which is wrong with a self-signed cert).
+
+### The systemd service
+
+`install.sh` writes `/etc/systemd/system/aruba-central-automation.service`, runs
+`systemctl daemon-reload`, then `systemctl enable --now` — so:
+
+- **It starts on boot** (`[Install] WantedBy=multi-user.target` + `enable`) and
+  **survives reboots**.
+- `Restart=on-failure` / `RestartSec=5` — systemd restarts the app ~5 s after a
+  crash.
+- `Type=simple` uvicorn, no `ExecReload` → `systemctl reload
+  aruba-central-automation` is a no-op; use `restart` to pick up new backend
+  code. `app/static/*` changes need nothing (`GET /` serves the file fresh).
+- Manage it with `systemctl {status,restart,stop}` and
+  `journalctl -u aruba-central-automation -f`.
+- Runs as a dedicated unprivileged system user (`aruba-ca`), `NoNewPrivileges`,
+  `PrivateTmp`.
 
 ### Production with a real certificate
 
