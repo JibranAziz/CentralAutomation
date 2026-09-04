@@ -2762,6 +2762,160 @@ async def config_cli_push(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"results": results, "preview": preview})
 
 
+# --------------------------------------------------------------------------- #
+# Configuration writes — New Central (network-config/v1alpha1 library profiles)
+# --------------------------------------------------------------------------- #
+NC_KIND_TYPE = {"ssid": "wlan-ssids", "radius": "auth-servers", "rf": "radios"}
+NC_KIND_FN = {"ssid": "CAMPUS_AP", "radius": "CAMPUS_AP", "rf": "CAMPUS_AP"}
+
+
+def _nc_ssid_body(f: dict[str, Any]) -> dict[str, Any]:
+    name = (f.get("name") or "").strip()
+    mode = f.get("opmode") or "OPEN"
+    body: dict[str, Any] = {
+        "ssid": name, "essid": {"name": name}, "enable": True,
+        "opmode": mode, "type": (f.get("type") or "EMPLOYEE"),
+        "forward-mode": f.get("forwardMode") or "FORWARD_MODE_BRIDGE",
+        "rf-band": f.get("rfBand") or "BAND_ALL",
+        "hide-ssid": bool(f.get("hidden")),
+        "vlan-selector": "VLAN_RANGES",
+        "vlan-id-range": [str(f.get("vlan") or "1")],
+        "mac-authentication": bool(f.get("macAuth")),
+    }
+    if "PERSONAL" in mode or "SAE" in mode or "PSK" in mode:
+        body["personal-security"] = {"passphrase-format": "STRING",
+                                     "wpa-passphrase": f.get("passphrase") or ""}
+    if "ENTERPRISE" in mode and f.get("authServerGroup"):
+        body["auth-server-group"] = f["authServerGroup"]
+    return body
+
+
+def _nc_radius_body(f: dict[str, Any]) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "name": (f.get("name") or "").strip(),
+        "type": "RADIUS",
+        "radius-server-mode": f.get("mode") or "AUTH_AND_COA",
+        "auth-server-address": (f.get("address") or "").strip(),
+        "auth-port": int(f.get("authPort") or 1812),
+        "acct-port": int(f.get("acctPort") or 1813),
+        "enable-radsec": bool(f.get("radsec")),
+        "dynamic-authorization-enable": bool(f.get("dynAuth", True)),
+        "msg-auth-required": bool(f.get("msgAuth")),
+    }
+    if f.get("secret") and f["secret"] != "********":
+        body["shared-secret-config"] = {"secret-type": "PLAIN_TEXT",
+                                        "plaintext-value": f["secret"]}
+    return body
+
+
+_NC_RF_TYPE = {"RADIO_2DOT4G": "DOT11G_TYPE", "RADIO_5G": "DOT11A_TYPE",
+               "RADIO_2ND_5G": "DOT11A_TYPE", "RADIO_6G": "DOT11A_TYPE"}
+
+
+def _nc_rf_body(f: dict[str, Any]) -> dict[str, Any]:
+    radios = []
+    for r in (f.get("radios") or []):
+        rp = r.get("profile")
+        arm: dict[str, Any] = {}
+        if r.get("minPower"):
+            arm["min-tx-power"] = str(r["minPower"])
+        if r.get("maxPower"):
+            arm["max-tx-power"] = str(r["maxPower"])
+        if r.get("minBw"):
+            arm["min-channel-bandwidth"] = r["minBw"]
+        if r.get("maxBw"):
+            arm["max-channel-bandwidth"] = r["maxBw"]
+        if r.get("channels"):
+            key = ("channels-for-2dot4GHz" if rp == "RADIO_2DOT4G"
+                   else "channels-for-6GHz" if rp == "RADIO_6G" else "channels-for-5GHz")
+            arm[key] = ["CHAN_" + c.strip() for c in str(r["channels"]).split(",") if c.strip()]
+        block: dict[str, Any] = {
+            "profile": rp, "radio-type": _NC_RF_TYPE.get(rp, "DOT11A_TYPE"),
+            "mode": "ACCESS", "enable": bool(r.get("enable", True)),
+            "ieee802dot11h": bool(r.get("dot11h")),
+        }
+        if arm:
+            block["arm-control"] = arm
+        radios.append(block)
+    return {"name": (f.get("name") or "").strip(), "radio": radios}
+
+
+_NC_BODY = {"ssid": _nc_ssid_body, "radius": _nc_radius_body, "rf": _nc_rf_body}
+
+
+@app.get("/api/config/new/scopes")
+async def nc_scopes(request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    groups = await _new_central_ap_groups(conn["host"], conn["access_token"]) or []
+    return JSONResponse({"scopes": [{"id": str(g.get("scopeId")), "name": g.get("scopeName")}
+                                    for g in groups]})
+
+
+@app.post("/api/config/new/{kind}")
+async def nc_config_create(kind: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    if kind not in NC_KIND_TYPE:
+        return _err(404, "Unknown configuration type.")
+    b = await request.json()
+    fields = b.get("fields") or {}
+    name = (fields.get("name") or "").strip()
+    scopes = [str(s) for s in (b.get("scopes") or []) if str(s).strip()]
+    if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,64}", name):
+        return _err(400, "Name: letters, numbers, spaces, . _ - only (max 64).")
+    body = _NC_BODY[kind](fields)
+    rtype = NC_KIND_TYPE[kind]
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    base = f"https://{conn['host']}{NC_CFG}"
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        r = await cx.put(f"{base}/{rtype}/{quote(name, safe='')}", headers=hdr, json=body)
+        ok = 200 <= r.status_code < 300
+        results.append({"step": f"create {rtype}", "ok": ok, "status": r.status_code,
+                        "error": "" if ok else (r.text or "")[:400]})
+        if not ok:
+            return JSONResponse({"ok": False, "results": results})
+        for sid in scopes:
+            ar = await cx.post(f"{base}/config-assignments", headers=hdr, json={
+                "config-assignment": [{
+                    "scope-id": sid, "device-function": NC_KIND_FN[kind],
+                    "profile-type": rtype, "profile-instance": name}]})
+            aok = 200 <= ar.status_code < 300
+            results.append({"step": f"assign to {sid}", "ok": aok, "status": ar.status_code,
+                            "error": "" if aok else (ar.text or "")[:300]})
+    return JSONResponse({"ok": True, "name": name, "results": results})
+
+
+@app.delete("/api/config/new/{kind}/{name}")
+async def nc_config_delete(kind: str, name: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    if kind not in NC_KIND_TYPE:
+        return _err(404, "Unknown configuration type.")
+    rtype = NC_KIND_TYPE[kind]
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json",
+           "Content-Type": "application/json"}
+    base = f"https://{conn['host']}{NC_CFG}"
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        abody = await _nc_get(cx, conn["host"], hdr, "config-assignments",
+                              {"profile-type": rtype})
+        for a in (abody or {}).get("config-assignment", []):
+            if a.get("profile-instance") == name:
+                await cx.delete(
+                    f"{base}/config-assignments/{a['scope-id']}/{a['device-function']}"
+                    f"/{rtype}/{quote(name, safe='')}", headers=hdr)
+        r = await cx.delete(f"{base}/{rtype}/{quote(name, safe='')}", headers=hdr)
+    ok = 200 <= r.status_code < 300
+    if not ok:
+        return _err(502, f"Central rejected the deletion ({r.status_code}): {(r.text or '')[:300]}")
+    return JSONResponse({"ok": True, "name": name})
+
+
 @app.post("/api/refresh/{kind}")
 async def refresh(kind: str, request: Request) -> JSONResponse:
     if kind not in ("classic", "new"):
