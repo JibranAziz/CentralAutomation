@@ -80,8 +80,18 @@ Because the certificate is self-signed, the browser shows a **"Not secure" /
 click **Advanced → Proceed / Continue**. The connection is still encrypted; the
 browser just can't verify a certificate you generated yourself.
 
-That's it. The app is running and will restart automatically if the machine
-reboots.
+That's it. The installer set it up as a **background service that starts on
+boot** — so it comes back on its own after a reboot or power cut, and restarts
+itself within a few seconds if it ever crashes. You don't need to keep a terminal
+open.
+
+To check on it or restart it later:
+
+```bash
+sudo systemctl status  aruba-central-automation     # is it running?
+sudo systemctl restart aruba-central-automation      # restart it
+sudo journalctl -u aruba-central-automation -f       # watch its log
+```
 
 ---
 
