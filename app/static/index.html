@@ -249,6 +249,8 @@
   }
   .formerr.on { display: flex; }
   .formerr svg { flex: none; margin-top: 1px; }
+  .formerr.as-info { background: var(--surface-2); border-color: var(--border); color: var(--muted); }
+  .formerr.as-info svg { color: var(--accent); }
 
   .actions { margin-top: 22px; display: flex; justify-content: flex-end; }
   .btn {
@@ -1250,7 +1252,13 @@
 
         <!-- AP group -->
         <div class="ncf-grp" data-for="group" hidden>
-          <div class="field"><label class="lbl" for="ncf-g-desc">Description</label>
+          <div class="info" style="margin-top:0">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+            <span>HPE Aruba's API only allows creating device groups on <strong>standalone / on-prem</strong> New Central.
+              If your account also has Classic Central (the toggle at the top-right of the Central UI), Central will
+              reject this — create the group in the Central UI instead. Try Create below to check.</span>
+          </div>
+          <div class="field" style="margin-top:12px"><label class="lbl" for="ncf-g-desc">Description</label>
             <input type="text" id="ncf-g-desc" autocomplete="off" placeholder="optional"></div>
         </div>
 
@@ -2160,9 +2168,11 @@
   var NCF_TITLE = { ssid: "Configure SSID", radius: "Create RADIUS server", rf: "Configure RF profile", group: "Add AP group" };
   var ncSection = document.getElementById("nc-config-section");
   var ncForm = document.getElementById("nc-config-form");
-  function ncErr(m) {
+  function ncErr(m, info) {
+    var box = document.getElementById("ncf-err");
     document.getElementById("ncf-err-msg").textContent = m || "";
-    document.getElementById("ncf-err").classList.toggle("on", !!m);
+    box.classList.toggle("on", !!m);
+    box.classList.toggle("as-info", !!m && !!info);
   }
   function closeNcConfig() { ncForm.hidden = true; ncSection.hidden = activeFlavor !== "new"; ncKind = null; }
   function nc(id) { return document.getElementById("ncf-" + id); }
@@ -2269,7 +2279,11 @@
     var out = document.getElementById("ncf-results"); out.innerHTML = "";
     api("/api/nc-config/" + ncKind, { method: "POST", body: JSON.stringify({ fields: f, scopes: scopes }) })
       .then(function (res) {
-        if (!res.ok && !(res.body && res.body.results)) { ncErr((res.body && res.body.error) || "Request failed."); return; }
+        if (!res.ok && !(res.body && res.body.results)) {
+          var em = (res.body && res.body.error) || "Request failed.";
+          ncErr(em, /both Classic and New Central|Central UI/.test(em));
+          return;
+        }
         (res.body.results || []).forEach(function (r) {
           var row = document.createElement("div");
           row.className = "cres " + (r.ok ? "ok" : "bad");
