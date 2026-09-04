@@ -256,7 +256,7 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
         "gateways": None, "sites": None, "subscriptions": None,
-        "apGroups": None, "ssids": None,
+        "apGroups": None, "ssids": None, "rfProfiles": None,
     }
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -277,6 +277,16 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
         out["ssids"] = ssid_total
         if dev_totals:
             out.update(dev_totals)
+    except Exception:
+        pass
+    try:
+        groups = await _new_central_ap_groups(host, token)
+        out["apGroups"] = len(groups) if groups is not None else None
+    except Exception:
+        pass
+    try:
+        rf = await _new_central_rf_list(host, token)
+        out["rfProfiles"] = len(rf) if rf is not None else None
     except Exception:
         pass
     return out
@@ -716,6 +726,7 @@ async def _new_central_device_detail(host: str, token: str, serial: str) -> Opti
 
 async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optional[list[dict[str, Any]]], int]:
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    total: Optional[int] = None
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         if entity == "clients":
             raw, total, sc = await _fetch_all(
@@ -757,6 +768,30 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
             if sc != 200 and not raw:
                 return None, 0
             rows = [_norm_wlan(x) for x in raw]
+        elif entity == "ap-groups":
+            body = await _nc_get(client, host, headers, "device-collections")
+            if body is None:
+                return None, 0
+            rows = [_nc_group_row(g) for g in body.get("items", [])]
+            rows.sort(key=lambda r: r["name"].lower())
+            total = len(rows)
+        elif entity == "rf-profiles":
+            body = await _nc_get(client, host, headers, "radios")
+            if body is None:
+                return None, 0
+            total = None
+            abody = await _nc_get(client, host, headers, "config-assignments",
+                                  {"profile-type": "radios"})
+            used: dict[str, set[str]] = {}
+            for a in (abody or {}).get("config-assignment", []):
+                if a.get("scope-name"):
+                    used.setdefault(a.get("profile-instance", ""), set()).add(a["scope-name"])
+            rows = []
+            for p in body.get("profile", []):
+                row = _nc_rf_row(p)
+                row["groups"] = ", ".join(sorted(used.get(p.get("name", ""), []))) or "—"
+                rows.append(row)
+            rows.sort(key=lambda r: r["name"].lower())
         else:
             return None, 0
     return rows, total if total is not None else len(rows)
@@ -811,6 +846,168 @@ async def _new_central_ssid_detail(host: str, token: str, name: str) -> Optional
         "groups": [g for g in groups if g],
         "devices": members,
         "meta": {"kind": "ssid"},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# New Central configuration model (network-config/v1alpha1)
+# --------------------------------------------------------------------------- #
+NC_CFG = "/network-config/v1alpha1"
+
+
+async def _nc_get(client: httpx.AsyncClient, host: str, headers: dict[str, str],
+                  root: str, params: Optional[dict[str, str]] = None):
+    r = await _retry_get(client, f"https://{host}{NC_CFG}/{root}", headers, params)
+    if r is None or r.status_code != 200:
+        return None
+    return r.json() if r.content else {}
+
+
+_NC_RADIO_BAND = {"RADIO_2DOT4G": "2.4 GHz", "RADIO_5G": "5 GHz",
+                  "RADIO_2ND_5G": "5 GHz (secondary)", "RADIO_6G": "6 GHz",
+                  "RADIO_2ND_6GHZ": "6 GHz (secondary)", "RADIO_2ND_6G": "6 GHz (secondary)"}
+_NC_BW = {"BW_20MHZ": "20 MHz", "BW_40MHZ": "40 MHz", "BW_80MHZ": "80 MHz",
+          "BW_160MHZ": "160 MHz", "BW_320MHZ": "320 MHz"}
+
+
+def _nc_chan_list(arm: dict[str, Any]) -> str:
+    for k in ("channels-for-2dot4GHz", "channels-for-5GHz", "channels-for-6GHz"):
+        v = arm.get(k)
+        if v:
+            return ", ".join(str(c).replace("CHAN_", "").replace("_6GHZ", "").replace("_5GHZ", "")
+                             for c in v)
+    return "Regulatory default"
+
+
+def _nc_width(arm: dict[str, Any]) -> Optional[str]:
+    lo = _NC_BW.get(arm.get("min-channel-bandwidth"), arm.get("min-channel-bandwidth"))
+    hi = _NC_BW.get(arm.get("max-channel-bandwidth"), arm.get("max-channel-bandwidth"))
+    if not lo and not hi:
+        return None
+    return lo if lo == hi else f"{lo} – {hi}"
+
+
+async def _new_central_ap_groups(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "device-collections")
+    if body is None:
+        return None
+    return body.get("items", [])
+
+
+async def _new_central_rf_list(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "radios")
+    if body is None:
+        return None
+    return body.get("profile", [])
+
+
+def _nc_group_row(g: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": g.get("scopeName") or "—",
+        "id": str(g.get("scopeId") or g.get("id") or ""),
+        "devices": g.get("deviceCount", 0),
+        "arch": "AOS-8 Instant" if g.get("isIap8x") else "AOS-10",
+        "description": g.get("description") or "—",
+    }
+
+
+def _nc_rf_row(p: dict[str, Any]) -> dict[str, Any]:
+    radios = p.get("radio", []) or []
+    bands = [_NC_RADIO_BAND.get(r.get("profile"), r.get("profile") or "?") for r in radios]
+    a5 = next((r for r in radios if r.get("profile") == "RADIO_5G"), radios[0] if radios else {})
+    arm = (a5 or {}).get("arm-control", {}) or {}
+    return {
+        "name": p.get("name") or "—",
+        "scope": "Named profile",
+        "radios": ", ".join(bands) or "—",
+        "txpower": (f"{arm.get('min-tx-power')}–{arm.get('max-tx-power')} dBm"
+                    if arm.get("min-tx-power") and arm.get("max-tx-power") else "—"),
+        "groups": "—",
+    }
+
+
+async def _new_central_group_detail(host: str, token: str, ident: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        gbody = await _nc_get(client, host, headers, "device-collections")
+        abody = await _nc_get(client, host, headers, "config-assignments",
+                              {"scope-id": str(ident)})
+    items = (gbody or {}).get("items", [])
+    g = next((x for x in items if str(x.get("scopeId")) == str(ident)
+              or x.get("scopeName") == ident), None)
+    if g is None:
+        return None
+    assigns = (abody or {}).get("config-assignment", [])
+    by_fn: dict[str, dict[str, list[str]]] = {}
+    for a in assigns:
+        by_fn.setdefault(a.get("device-function", "?"), {}).setdefault(
+            a.get("profile-type", "?"), []).append(a.get("profile-instance", "?"))
+    groups = [_kv_group("Group", {
+        "arch": "AOS-8 Instant" if g.get("isIap8x") else "AOS-10",
+        "devices": g.get("deviceCount", 0),
+        "desc": g.get("description") or None,
+        "scope": str(g.get("scopeId") or ""),
+    }, [("arch", "Architecture"), ("devices", "Devices"), ("desc", "Description"),
+        ("scope", "Scope ID")])]
+    for fn in sorted(by_fn):
+        src = {pt: ", ".join(sorted(set(v))) for pt, v in sorted(by_fn[fn].items())}
+        grp = _kv_group(_humanize(fn) + " profiles", src,
+                        [(pt, _humanize(pt)) for pt in src])
+        if grp:
+            groups.append(grp)
+    return {
+        "title": g.get("scopeName") or str(ident),
+        "subtitle": "Device collection (AP group)",
+        "status": "",
+        "groups": groups,
+        "devices": [],
+        "meta": {"kind": "group"},
+    }
+
+
+async def _new_central_rf_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "radios")
+        abody = await _nc_get(client, host, headers, "config-assignments",
+                              {"profile-type": "radios"})
+    p = next((x for x in (body or {}).get("profile", []) if x.get("name") == name), None)
+    if p is None:
+        return None
+    used_by = sorted({a.get("scope-name") for a in (abody or {}).get("config-assignment", [])
+                      if a.get("profile-instance") == name and a.get("scope-name")})
+    groups = []
+    for r in p.get("radio", []) or []:
+        band = _NC_RADIO_BAND.get(r.get("profile"), r.get("profile") or "?")
+        arm = r.get("arm-control", {}) or {}
+        src = {
+            "power": (f"{arm.get('min-tx-power')}–{arm.get('max-tx-power')} dBm"
+                      if arm.get("min-tx-power") and arm.get("max-tx-power") else None),
+            "width": _nc_width(arm),
+            "channels": _nc_chan_list(arm),
+            "mode": r.get("mode"),
+            "enabled": "Yes" if r.get("enable") else "No",
+            "dot11h": "On" if r.get("ieee802dot11h") else None,
+            "bgscan": "On" if r.get("background-spectrum-monitoring") else None,
+            "zwdfs": "On" if arm.get("zero-wait-dfs") else None,
+        }
+        grp = _kv_group(f"{band} radio", src, [
+            ("enabled", "Enabled"), ("mode", "Mode"), ("power", "Allowed transmit power"),
+            ("width", "Channel width"), ("channels", "Allowed channels"),
+            ("dot11h", "802.11h"), ("bgscan", "Background spectrum monitoring"),
+            ("zwdfs", "Zero-wait DFS"),
+        ])
+        if grp:
+            groups.append(grp)
+    groups.append({"label": "Assigned to",
+                   "fields": [["AP groups / scopes", ", ".join(used_by) or "—"]]})
+    return {
+        "title": name, "subtitle": "RF profile (radios)", "status": "",
+        "groups": groups, "devices": [], "meta": {"kind": "rf"},
     }
 
 
@@ -1539,8 +1736,13 @@ async def _classic_central_ssid_detail(host: str, token: str, name: str) -> Opti
 
 
 def _humanize(k: str) -> str:
-    s = re.sub(r"(?<!^)(?=[A-Z])", " ", str(k)).replace("_", " ").strip()
-    return s[:1].upper() + s[1:] if s else str(k)
+    words: list[str] = []
+    for part in re.split(r"[_\-\s]+", str(k).strip()):
+        for w in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", part) or [part]:
+            words.append(w)
+    if not words:
+        return str(k)
+    return " ".join(w if (w.isupper() and len(w) <= 3) else w.capitalize() for w in words)
 
 
 async def _classic_central_group_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
@@ -1800,7 +2002,8 @@ _DASH = {
         "overview": _new_central_overview, "list": _new_central_list,
         "client": _new_central_client_detail, "device": _new_central_device_detail,
         "site": _new_central_site_detail, "topology": _new_central_topology,
-        "ssid": _new_central_ssid_detail,
+        "ssid": _new_central_ssid_detail, "group": _new_central_group_detail,
+        "rf": _new_central_rf_detail,
     },
     "classic": {
         "overview": _classic_central_overview, "list": _classic_central_list,
@@ -1861,9 +2064,11 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "ssids":
                 return {"ssids": await _get_total(cx, f"https://{host}/network-monitoring/v1/wlans", hdr, {"limit": "1"})}
             if group == "apGroups":
-                return {"apGroups": None}
+                g = await _new_central_ap_groups(host, token)
+                return {"apGroups": len(g) if g is not None else None}
             if group == "rfProfiles":
-                return {"rfProfiles": None}
+                rf = await _new_central_rf_list(host, token)
+                return {"rfProfiles": len(rf) if rf is not None else None}
         else:  # classic
             if group == "clients":
                 tot = 0
