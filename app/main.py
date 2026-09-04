@@ -2843,7 +2843,7 @@ def _nc_rf_body(f: dict[str, Any]) -> dict[str, Any]:
 _NC_BODY = {"ssid": _nc_ssid_body, "radius": _nc_radius_body, "rf": _nc_rf_body}
 
 
-@app.get("/api/config/new/scopes")
+@app.get("/api/nc-config/scopes")
 async def nc_scopes(request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
     if err:
@@ -2853,12 +2853,12 @@ async def nc_scopes(request: Request) -> JSONResponse:
                                     for g in groups]})
 
 
-@app.post("/api/config/new/{kind}")
+@app.post("/api/nc-config/{kind}")
 async def nc_config_create(kind: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
     if err:
         return err
-    if kind not in NC_KIND_TYPE:
+    if kind not in NC_KIND_TYPE and kind != "group":
         return _err(404, "Unknown configuration type.")
     b = await request.json()
     fields = b.get("fields") or {}
@@ -2866,6 +2866,23 @@ async def nc_config_create(kind: str, request: Request) -> JSONResponse:
     scopes = [str(s) for s in (b.get("scopes") or []) if str(s).strip()]
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,64}", name):
         return _err(400, "Name: letters, numbers, spaces, . _ - only (max 64).")
+
+    if kind == "group":
+        hdr = {"Authorization": f"Bearer {conn['access_token']}",
+               "Content-Type": "application/json", "Accept": "application/json"}
+        async with httpx.AsyncClient(timeout=45.0) as cx:
+            r = await cx.post(f"https://{conn['host']}/network-config/v1/device-groups",
+                              headers=hdr,
+                              json={"scopeName": name, "description": fields.get("description") or ""})
+        if 200 <= r.status_code < 300:
+            return JSONResponse({"ok": True, "name": name,
+                                 "results": [{"step": "create device group", "ok": True,
+                                              "status": r.status_code, "error": ""}]})
+        txt = (r.text or "")
+        if "HYBRID_CLUSTER" in txt:
+            return _err(400, "Creating groups isn't supported on an account that has both "
+                             "Classic and New Central — create it in the Central UI instead.")
+        return _err(502, f"Central rejected the group ({r.status_code}): {txt[:300]}")
     body = _NC_BODY[kind](fields)
     rtype = NC_KIND_TYPE[kind]
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
@@ -2890,16 +2907,30 @@ async def nc_config_create(kind: str, request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "name": name, "results": results})
 
 
-@app.delete("/api/config/new/{kind}/{name}")
+@app.delete("/api/nc-config/{kind}/{name}")
 async def nc_config_delete(kind: str, name: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
     if err:
         return err
-    if kind not in NC_KIND_TYPE:
+    if kind not in NC_KIND_TYPE and kind != "group":
         return _err(404, "Unknown configuration type.")
-    rtype = NC_KIND_TYPE[kind]
     hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json",
            "Content-Type": "application/json"}
+
+    if kind == "group":
+        async with httpx.AsyncClient(timeout=45.0) as cx:
+            r = await cx.delete(
+                f"https://{conn['host']}/network-config/v1/device-groups/{quote(name, safe='')}",
+                headers=hdr)
+        if 200 <= r.status_code < 300:
+            return JSONResponse({"ok": True, "name": name})
+        txt = (r.text or "")
+        if "HYBRID_CLUSTER" in txt:
+            return _err(400, "Deleting groups isn't supported on an account that has both "
+                             "Classic and New Central — use the Central UI.")
+        return _err(502, f"Central rejected the deletion ({r.status_code}): {txt[:300]}")
+
+    rtype = NC_KIND_TYPE[kind]
     base = f"https://{conn['host']}{NC_CFG}"
     async with httpx.AsyncClient(timeout=45.0) as cx:
         abody = await _nc_get(cx, conn["host"], hdr, "config-assignments",

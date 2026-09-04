@@ -353,15 +353,21 @@ Library-profile CRUD (all verified live 2026-09-04):
   `wlan-ssids` = needs a matching `aruba-role`. The library-profile create
   always succeeds regardless; the per-scope assign result is reported and the
   user finishes assignment in the Central UI.
-- **Add AP group is NOT possible** on this cluster — `POST
-  /network-config/v1alpha1/device-collections` → `API_ACCESS_RESTRICTED_IN_HYBRID_CLUSTER`;
-  no per-name PUT. So the New Central config section has **3 cards** (SSID /
-  RADIUS / RF), not 4, with a hint to make groups in the UI.
-- Endpoints: `POST /api/config/new/{ssid|radius|rf}` `{fields, scopes[]}`,
-  `DELETE /api/config/new/{kind}/{name}`, `GET /api/config/new/scopes`.
+- **Add AP group** — `POST /network-config/v1/device-groups`
+  `{scopeName, description}` (create), `DELETE /network-config/v1/device-groups/{id}`.
+  Per the Aruba docs this API "is not supported & will not work" when the account
+  has **both** Classic Central and New Central — it returns
+  `API_ACCESS_RESTRICTED_IN_HYBRID_CLUSTER`, which the app catches and shows as
+  "create it in the Central UI instead". Works on standalone / on-prem New
+  Central. The card is shown for all New Central users; the section has a note.
+- Endpoints: `GET /api/nc-config/scopes`,
+  `POST /api/nc-config/{ssid|radius|rf|group}` `{fields, scopes[]}`,
+  `DELETE /api/nc-config/{kind}/{name}`. **Note the `nc-config` prefix** — a
+  `/api/config/new/group` path would collide with the Classic
+  `@app.post("/api/config/{flavor}/group")` route (matched first).
 - UI: separate `#nc-config-section` / `#nc-config-form` (shown when
-  `activeFlavor === "new"`); delete is a danger button on the New Central SSID
-  and RF-profile detail pages (`dangerRow` / `deleteNcProfile`).
+  `activeFlavor === "new"`), 4 cards. Delete is a `dangerRow` on the New Central
+  SSID / RF-profile / AP-group detail pages (`deleteNcProfile`).
 
 ## Topology view (frontend)
 
