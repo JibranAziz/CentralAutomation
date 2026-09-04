@@ -8,6 +8,8 @@ __pycache__/
 # Env / secrets
 .env
 *.local
+HANDOVER.local.md
+*.local.md
 
 # OS / editor
 .DS_Store
