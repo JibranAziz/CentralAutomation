@@ -369,6 +369,30 @@ Library-profile CRUD (all verified live 2026-09-04):
   `activeFlavor === "new"`), 4 cards. Delete is a `dangerRow` on the New Central
   SSID / RF-profile / AP-group detail pages (`deleteNcProfile`).
 
+### Bulk channel & power (both flavors)
+
+`#bulk-radio-form` — a "Bulk channel & power" card in **both** config sections.
+Per band (2.4 / 5 / 6 GHz): allowed channels, min TX, max TX — blank = leave
+unchanged, untick a band to skip it. Target = AP-group multi-select.
+
+- **Classic** → generates `rf dot11g|dot11a|dot11-6ghz-radio-profile` blocks with
+  just `allowed-channels` / `min-tx-power` / `max-tx-power` and POSTs the existing
+  `/api/config/classic/cli` with `submerge:true, managed:[those 3]` (Preview +
+  Apply). Same proven mechanism as the RF-profile form, so it only touches those
+  fields in each group's default radio profile.
+- **New Central** → `POST /api/nc-config/bulk-radio` `{scopes[], bands:{
+  RADIO_2DOT4G|RADIO_5G|RADIO_6G:{channels, minPower, maxPower}}}`. For each
+  scope it finds the assigned `radios` profile (from `config-assignments?
+  profile-type=radios`), GETs it, patches `arm-control.channels-for-*` /
+  `min-tx-power` / `max-tx-power` on the requested bands only, and PUTs it back.
+  Each distinct profile is written once even if several groups share it; a scope
+  with no assigned radio profile is reported and skipped. Verified live
+  2026-09-09 (channels + power updated, restored).
+- **Per-AP (individual AP) channel/power is NOT possible** — Central silently
+  drops `ap-name` / `per-ap-settings` / `ap` blocks from an AOS-10 group's
+  AP-CLI, and New Central per-AP overrides are device-scoped local profiles that
+  the API doesn't cleanly expose. The card is group-level only.
+
 ## Topology view (frontend)
 
 `loadTopology(meta)` in `index.html` runs at the bottom of the entity-detail

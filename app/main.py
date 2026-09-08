@@ -2853,6 +2853,74 @@ async def nc_scopes(request: Request) -> JSONResponse:
                                     for g in groups]})
 
 
+_NC_BAND_CHAN_KEY = {"RADIO_2DOT4G": "channels-for-2dot4GHz", "RADIO_5G": "channels-for-5GHz",
+                     "RADIO_2ND_5G": "channels-for-5GHz", "RADIO_6G": "channels-for-6GHz"}
+_NC_CHAN_SUFFIX = {"RADIO_6G": "_6GHZ"}
+
+
+@app.post("/api/nc-config/bulk-radio")
+async def nc_bulk_radio(request: Request) -> JSONResponse:
+    """Bulk-edit channel / TX power on the radio profile(s) assigned to the
+    selected AP groups (device collections). Only the bands/fields given are
+    touched; everything else in the profile is left as-is."""
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    b = await request.json()
+    scopes = [str(s) for s in (b.get("scopes") or []) if str(s).strip()]
+    bands = b.get("bands") or {}
+    if not scopes:
+        return _err(400, "Select at least one AP group.")
+    if not any(v for v in bands.values()):
+        return _err(400, "Set at least one channel or power value.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    base = f"https://{conn['host']}{NC_CFG}"
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        abody = await _nc_get(cx, conn["host"], hdr, "config-assignments",
+                              {"profile-type": "radios"}) or {}
+        by_scope = {str(a.get("scope-id")): a.get("profile-instance")
+                    for a in abody.get("config-assignment", [])}
+        done: set[str] = set()
+        for sid in scopes:
+            prof = by_scope.get(sid)
+            if not prof:
+                results.append({"step": sid, "ok": False, "status": 0,
+                                "error": "no radio profile assigned to this group"})
+                continue
+            if prof in done:
+                results.append({"step": f"{sid} ({prof})", "ok": True, "status": 200,
+                                "error": "already updated"})
+                continue
+            r = await cx.get(f"{base}/radios/{quote(prof, safe='')}", headers=hdr)
+            if r.status_code != 200:
+                results.append({"step": f"{sid} ({prof})", "ok": False, "status": r.status_code,
+                                "error": (r.text or "")[:200]})
+                continue
+            doc = r.json()
+            for radio in doc.get("radio", []):
+                spec = bands.get(radio.get("profile"))
+                if not spec:
+                    continue
+                arm = radio.setdefault("arm-control", {})
+                if spec.get("channels"):
+                    sfx = _NC_CHAN_SUFFIX.get(radio["profile"], "")
+                    arm[_NC_BAND_CHAN_KEY[radio["profile"]]] = [
+                        "CHAN_" + c.strip() + sfx for c in str(spec["channels"]).split(",") if c.strip()]
+                if spec.get("minPower"):
+                    arm["min-tx-power"] = f'{float(spec["minPower"]):.1f}'
+                if spec.get("maxPower"):
+                    arm["max-tx-power"] = f'{float(spec["maxPower"]):.1f}'
+            pr = await cx.put(f"{base}/radios/{quote(prof, safe='')}", headers=hdr, json=doc)
+            pok = 200 <= pr.status_code < 300
+            if pok:
+                done.add(prof)
+            results.append({"step": f"{sid} ({prof})", "ok": pok, "status": pr.status_code,
+                            "error": "" if pok else (pr.text or "")[:250]})
+    return JSONResponse({"ok": any(r["ok"] for r in results), "results": results})
+
+
 @app.post("/api/nc-config/{kind}")
 async def nc_config_create(kind: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
@@ -2905,8 +2973,6 @@ async def nc_config_create(kind: str, request: Request) -> JSONResponse:
             results.append({"step": f"assign to {sid}", "ok": aok, "status": ar.status_code,
                             "error": "" if aok else (ar.text or "")[:300]})
     return JSONResponse({"ok": True, "name": name, "results": results})
-
-
 @app.delete("/api/nc-config/{kind}/{name}")
 async def nc_config_delete(kind: str, name: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")

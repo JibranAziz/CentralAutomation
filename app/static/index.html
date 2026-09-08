@@ -956,6 +956,13 @@
               </div>
               <div class="s-sub">Create a new configuration group</div>
             </button>
+            <button class="statcard" type="button" data-bulkradio="classic" style="--c:#14b8a6">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12h2l2-7 3 11 2-7 1 3h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                <span class="s-label">Bulk channel &amp; power</span>
+              </div>
+              <div class="s-sub">Change channel / TX power across selected AP groups</div>
+            </button>
           </div>
         </div>
       </div>
@@ -1175,6 +1182,10 @@
             <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2.5 5 8 2.5 13.5 5 8 7.5 2.5 5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2.5 8 8 10.5 13.5 8M2.5 11 8 13.5 13.5 11" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span><span class="s-label">Add AP group</span></div>
             <div class="s-sub">Create a device group</div>
           </button>
+          <button class="statcard" type="button" data-bulkradio="new" style="--c:#14b8a6">
+            <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12h2l2-7 3 11 2-7 1 3h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="s-label">Bulk channel &amp; power</span></div>
+            <div class="s-sub">Change channel / TX power on the radio profiles assigned to AP groups</div>
+          </button>
         </div>
         <div class="hint" style="margin-top:8px">Note: creating/deleting AP groups isn't supported when your account has both Classic and New Central — Central rejects it; use the Central UI. It works on standalone / on-prem New Central.</div>
       </div>
@@ -1311,6 +1322,52 @@
         <div class="formerr" id="ncf-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="ncf-err-msg"></span></div>
         <div class="actions"><button type="button" class="btn" id="ncf-create">Create</button></div>
         <div id="ncf-results"></div>
+      </div>
+
+      <!-- Bulk channel & power (both flavors) -->
+      <div id="bulk-radio-form" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="br-back">← Account Overview</button>
+          <span class="panel-head" id="br-title" style="margin:0">Bulk channel &amp; power</span>
+        </div>
+        <div class="hint" id="br-hint" style="margin-bottom:10px"></div>
+        <div class="tablewrap"><table class="rfp-table">
+          <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz</th></tr></thead>
+          <tbody>
+            <tr><td>Change this band</td>
+              <td><input type="checkbox" class="br" id="br-en-2" checked></td>
+              <td><input type="checkbox" class="br" id="br-en-5" checked></td>
+              <td><input type="checkbox" class="br" id="br-en-6"></td></tr>
+            <tr><td>Allowed channels</td>
+              <td><input type="text" class="br" id="br-ch-2" data-mono placeholder="1,6,11"></td>
+              <td><input type="text" class="br" id="br-ch-5" data-mono placeholder="36,40,44,…"></td>
+              <td><input type="text" class="br" id="br-ch-6" data-mono placeholder="1,5,9,…"></td></tr>
+            <tr><td>Min TX power (dBm)</td>
+              <td><input type="number" class="br" id="br-minp-2"></td>
+              <td><input type="number" class="br" id="br-minp-5"></td>
+              <td><input type="number" class="br" id="br-minp-6"></td></tr>
+            <tr><td>Max TX power (dBm)</td>
+              <td><input type="number" class="br" id="br-maxp-2"></td>
+              <td><input type="number" class="br" id="br-maxp-5"></td>
+              <td><input type="number" class="br" id="br-maxp-6"></td></tr>
+          </tbody>
+        </table></div>
+        <div class="hint" style="margin-top:2px">Blank fields are left unchanged. Untick a band to skip it entirely.</div>
+
+        <div class="cgroups" style="margin-top:14px">
+          <div class="lbl">AP groups <span class="req">*</span></div>
+          <div class="cgroup-tools"><input type="search" id="br-group-search" placeholder="Filter…" autocomplete="off">
+            <button class="linkbtn" type="button" id="br-group-all">Select all</button>
+            <button class="linkbtn" type="button" id="br-group-none">Clear</button></div>
+          <div class="cgroup-list" id="br-groups"></div>
+        </div>
+
+        <div class="formerr" id="br-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="br-err-msg"></span></div>
+        <div class="actions">
+          <button type="button" class="btn ghost" id="br-preview" hidden>Preview</button>
+          <button type="button" class="btn" id="br-apply">Apply</button>
+        </div>
+        <div id="br-results"></div>
       </div>
 
       <div id="dash-detail" hidden>
@@ -1501,6 +1558,7 @@
     document.getElementById("nc-config-section").hidden = flavor !== "new";
     closeConfig();
     closeNcConfig();
+    closeBulkRadio();
   }
 
   function updateDashboards() {
@@ -2296,6 +2354,161 @@
       })
       .catch(function () { ncErr("Network error."); })
       .finally(function () { btn.disabled = false; btn.textContent = "Create"; });
+  });
+
+  /* ---- Bulk channel & power ---- */
+  var brFlavor = null;
+  var brForm = document.getElementById("bulk-radio-form");
+  var BR_BANDS = [["2", "RADIO_2DOT4G", "dot11g"], ["5", "RADIO_5G", "dot11a"], ["6", "RADIO_6G", "dot11-6ghz"]];
+  function brErr(m) {
+    document.getElementById("br-err-msg").textContent = m || "";
+    document.getElementById("br-err").classList.toggle("on", !!m);
+  }
+  function closeBulkRadio() {
+    brForm.hidden = true;
+    if (brFlavor === "classic") document.getElementById("config-section").hidden = activeFlavor !== "classic";
+    if (brFlavor === "new") document.getElementById("nc-config-section").hidden = activeFlavor !== "new";
+    brFlavor = null;
+  }
+  function br(id) { return document.getElementById("br-" + id); }
+  function brRenderGroups(list, filter) {
+    var box = document.getElementById("br-groups");
+    var f = (filter || "").toLowerCase();
+    box.innerHTML = "";
+    (list || []).filter(function (g) { return g.name.toLowerCase().indexOf(f) !== -1; })
+      .forEach(function (g) {
+        var l = document.createElement("label");
+        var cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "brg"; cb.value = g.id; cb.setAttribute("data-name", g.name);
+        l.appendChild(cb); l.appendChild(document.createTextNode(g.name));
+        box.appendChild(l);
+      });
+    if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No AP groups.</p>';
+  }
+  var brGroupCache = [];
+  function openBulkRadio(flavor) {
+    brFlavor = flavor;
+    brForm.hidden = false;
+    document.getElementById("config-section").hidden = true;
+    document.getElementById("nc-config-section").hidden = true;
+    overviewInner.hidden = true; detailEl.hidden = true;
+    brErr(""); document.getElementById("br-results").innerHTML = "";
+    document.getElementById("br-preview").hidden = flavor !== "classic";
+    document.getElementById("br-hint").textContent = flavor === "classic"
+      ? "Merges the channels / power you set into each group's default radio profile (leaves everything else alone)."
+      : "Updates the radio profile currently assigned to each selected AP group. Groups with no assigned profile are skipped.";
+    brForm.querySelectorAll(".br").forEach(function (el) {
+      if (el.type === "checkbox") el.checked = el.id.indexOf("-en-6") === -1;
+      else el.value = "";
+    });
+    var box = document.getElementById("br-groups");
+    box.innerHTML = '<p class="cgroup-count">Loading…</p>';
+    var url = flavor === "classic" ? "/api/config/classic/groups" : "/api/nc-config/scopes";
+    api(url).then(function (res) {
+      brGroupCache = flavor === "classic"
+        ? ((res.ok && res.body.groups) || []).map(function (n) { return { id: n, name: n }; })
+        : ((res.ok && res.body.scopes) || []);
+      brRenderGroups(brGroupCache, "");
+    });
+  }
+  function brBands() {
+    var out = {};
+    BR_BANDS.forEach(function (b) {
+      if (!br("en-" + b[0]).checked) return;
+      var spec = {
+        channels: br("ch-" + b[0]).value.trim().replace(/\s+/g, ""),
+        minPower: br("minp-" + b[0]).value.trim(),
+        maxPower: br("maxp-" + b[0]).value.trim(),
+      };
+      if (spec.channels || spec.minPower || spec.maxPower) out[b[1]] = spec;
+    });
+    return out;
+  }
+  function brClassicCli(bands) {
+    var L = [];
+    BR_BANDS.forEach(function (b) {
+      var s = bands[b[1]];
+      if (!s) return;
+      L.push("rf " + b[2] + "-radio-profile");
+      if (s.channels) L.push("  allowed-channels " + s.channels);
+      if (s.minPower) L.push("  min-tx-power " + s.minPower);
+      if (s.maxPower) L.push("  max-tx-power " + s.maxPower);
+    });
+    return L.join("\n") + "\n";
+  }
+  function brSelected() {
+    return Array.prototype.map.call(document.querySelectorAll("#br-groups .brg:checked"),
+      function (c) { return { id: c.value, name: c.getAttribute("data-name") }; });
+  }
+  function brRow(out, label, ok, msg) {
+    var row = document.createElement("div");
+    row.className = "cres " + (ok ? "ok" : "bad");
+    row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
+    row.querySelector(".cr-grp").textContent = label;
+    row.querySelector(".cr-msg").textContent = msg;
+    out.appendChild(row);
+  }
+  function brRun(preview) {
+    brErr("");
+    var bands = brBands();
+    if (!Object.keys(bands).length) { brErr("Set at least one channel or power value on an enabled band."); return; }
+    var groups = brSelected();
+    if (!groups.length) { brErr("Select at least one AP group."); return; }
+    if (!preview && !window.confirm("Apply channel / power changes to " + groups.length + " AP group(s)?")) return;
+    var out = document.getElementById("br-results"); out.innerHTML = "";
+    var pv = document.getElementById("br-preview"), ap = document.getElementById("br-apply");
+    pv.disabled = ap.disabled = true; (preview ? pv : ap).textContent = preview ? "Building…" : "Applying…";
+    var done = function () {
+      pv.disabled = ap.disabled = false; pv.textContent = "Preview"; ap.textContent = "Apply";
+    };
+    if (brFlavor === "classic") {
+      api("/api/config/classic/cli", {
+        method: "POST",
+        body: JSON.stringify({
+          cli: brClassicCli(bands), groups: groups.map(function (g) { return g.id; }),
+          preview: preview, submerge: true,
+          managed: ["allowed-channels", "min-tx-power", "max-tx-power"],
+        }),
+      }).then(function (res) {
+        if (!res.ok) { brErr((res.body && res.body.error) || "Request failed."); return; }
+        (res.body.results || []).forEach(function (r) {
+          brRow(out, r.group, r.ok, r.ok ? (preview ? ((r.added >= 0 ? "+" : "") + r.added + " lines") : "deployed")
+            : ("failed (" + r.status + ") " + (r.error || "")).trim());
+          if (preview && r.preview) {
+            var pre = document.createElement("pre"); pre.className = "cli-preview"; pre.textContent = r.preview;
+            out.appendChild(pre);
+          }
+        });
+        if (!preview) overviewLoaded.classic = false;
+      }).catch(function () { brErr("Network error."); }).finally(done);
+    } else {
+      api("/api/nc-config/bulk-radio", {
+        method: "POST",
+        body: JSON.stringify({ scopes: groups.map(function (g) { return g.id; }), bands: bands }),
+      }).then(function (res) {
+        if (!res.ok && !(res.body && res.body.results)) { brErr((res.body && res.body.error) || "Request failed."); return; }
+        var nameById = {};
+        groups.forEach(function (g) { nameById[g.id] = g.name; });
+        (res.body.results || []).forEach(function (r) {
+          var id = String(r.step).split(" ")[0];
+          brRow(out, nameById[id] || r.step, r.ok, r.ok ? (r.error || "updated") : (r.error || ("failed " + r.status)));
+        });
+        if (res.body.ok) overviewLoaded.new = false;
+      }).catch(function () { brErr("Network error."); }).finally(done);
+    }
+  }
+  document.querySelectorAll("[data-bulkradio]").forEach(function (b) {
+    b.addEventListener("click", function () { openBulkRadio(b.getAttribute("data-bulkradio")); });
+  });
+  document.getElementById("br-back").addEventListener("click", closeBulkRadio);
+  document.getElementById("br-preview").addEventListener("click", function () { brRun(true); });
+  document.getElementById("br-apply").addEventListener("click", function () { brRun(false); });
+  document.getElementById("br-group-search").addEventListener("input", function () { brRenderGroups(brGroupCache, this.value); });
+  document.getElementById("br-group-all").addEventListener("click", function () {
+    document.querySelectorAll("#br-groups .brg").forEach(function (c) { c.checked = true; });
+  });
+  document.getElementById("br-group-none").addEventListener("click", function () {
+    document.querySelectorAll("#br-groups .brg").forEach(function (c) { c.checked = false; });
   });
 
   /* ---- drill-down ---- */
