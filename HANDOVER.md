@@ -3,7 +3,7 @@
 Living document. Update it in the same commit as any change to behaviour,
 deployment, or API usage.
 
-_Last updated: 2026-09-03_
+_Last updated: 2026-09-09_
 
 ---
 
