@@ -423,6 +423,14 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
   policy-rule[]` (`condition.source` = ADDRESS_ROLE/ANY, `action` = ACTION_ALLOW/
   DENY). Most are AOS built-ins (`ap-acl`, `logon-control`, …). View-only.
 
+**Edit** — a pencil on each row of the Access Rules view (Classic only;
+`DETAIL["access-rules"].edit = {kind:"acl", flavors:["classic"]}`) opens the
+"Configure access rule" form via `openAclEditor(name, groups)`: it ticks the
+rule's AP groups as deploy targets and pulls the current block
+(`GET /api/config/classic/cli/<first group>?block=wlan access-rule <name>`)
+into the row builder. Wired through `cfgAfterOpen`, a one-shot hook fired at the
+end of `openConfig`'s group-list fetch so the preselect can't race the render.
+
 **Edit** (Classic only) — "Configure access rule" config card (`#aclform`):
 name + `utf8` + optional VLAN / captive-portal, plus a **row builder** — each
 rule is Destination (any / host IP / alias / network) + Service (any / tcp /

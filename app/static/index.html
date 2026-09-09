@@ -1757,7 +1757,7 @@
   });
 
   /* ---- Configuration (Classic AP-CLI writes) ---- */
-  var cfgKind = null, cfgGroups = [], cliTouched = false, cfgLoadedName = "";
+  var cfgKind = null, cfgGroups = [], cliTouched = false, cfgLoadedName = "", cfgAfterOpen = null;
   var overviewInner = document.getElementById("dash-overview");
   var configForm = document.getElementById("config-form");
   var cgroupList = document.getElementById("cgroup-list");
@@ -2025,7 +2025,40 @@
         var o = document.createElement("option"); o.value = g; o.textContent = g;
         sel.appendChild(o);
       });
+      if (cfgAfterOpen) { var fn = cfgAfterOpen; cfgAfterOpen = null; fn(); }
     });
+  }
+
+  // open the ACL editor pre-loaded with an existing rule (from the Access Rules view)
+  function openAclEditor(name, groups) {
+    if (activeFlavor !== "classic") return;
+    var want = String(groups || "").split(",").map(function (s) { return s.trim(); })
+      .filter(function (s) { return s && s !== "—"; });
+    var first = want[0];
+    cfgAfterOpen = function () {
+      var note = document.getElementById("cf-load-note");
+      nameEl.value = name || "";
+      cgroupList.querySelectorAll(".cg").forEach(function (c) {
+        if (want.indexOf(c.value) !== -1) c.checked = true;
+      });
+      if (first) document.getElementById("cf-load-group").value = first;
+      if (!first || !name) {
+        note.textContent = name ? "Pick a group and Load to pull its current rules." : "";
+        return;
+      }
+      note.textContent = "Loading " + name + "…";
+      api("/api/config/classic/cli/" + encodeURIComponent(first) +
+          "?block=" + encodeURIComponent("wlan access-rule " + name)).then(function (res) {
+        if (res.ok && res.body && res.body.cli) {
+          fillAclFromCli(res.body.cli);
+          aclLoadedName = name;
+          note.textContent = "Loaded " + name + " from " + first + " — edit and Deploy.";
+        } else {
+          note.textContent = "Couldn't auto-load " + name + " — use “Load from” " + first + ".";
+        }
+      }).catch(function () { note.textContent = "Network error loading " + name + "."; });
+    };
+    openConfig("acl");
   }
 
   function grpReset() {
@@ -2868,7 +2901,8 @@
     "rf-profiles": { title: "RF Profiles", drill: "rf", idKey: "name", cols: [
       ["name", "RF Profile"], ["scope", "Scope"], ["radios", "Radios"],
       ["txpower", "TX power (5 GHz)"], ["groups", "AP Groups"]] },
-    "access-rules": { title: "Access Rules", drill: "acl", idKey: "name", cols: [
+    "access-rules": { title: "Access Rules", drill: "acl", idKey: "name",
+      edit: { kind: "acl", flavors: ["classic"] }, cols: [
       ["name", "Rule / role"], ["type", "Type"], ["rules", "Rules"],
       ["ssids", "Used by SSIDs"], ["groups", "AP Groups"]] },
     "ap-radios": { title: "Radio and TX Power", drill: "device", idKey: "serial", wide: true,
@@ -3008,7 +3042,8 @@
           eb.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2M2.5 13.5l.7-2.8 7-7 2 2-7 7-2.7.8z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
           eb.addEventListener("click", function (ev) {
             ev.stopPropagation();
-            openBulkRadio(activeFlavor, { mode: def.edit.mode, id: r[def.idKey], name: r.name });
+            if (def.edit.kind === "acl") openAclEditor(r.name, r.groups);
+            else openBulkRadio(activeFlavor, { mode: def.edit.mode, id: r[def.idKey], name: r.name });
           });
           ec.appendChild(eb);
         }
