@@ -2177,6 +2177,90 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"groups": sorted(names or [], key=str.lower)})
 
 
+@app.get("/api/config/{flavor}/aps")
+async def config_aps(flavor: str, request: Request) -> JSONResponse:
+    """Lightweight AP roster for the per-AP channel & power picker."""
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Per-AP radio settings are Classic Central only.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+        raw, _t, _sc = await _fetch_all(cx, f"https://{conn['host']}/monitoring/v2/aps", hdr,
+                                       style="offset", params={"limit": "1000"}, item_key="aps")
+    aps = [{
+        "serial": _pick(a, "serial", "serial_number", default=""),
+        "name": _pick(a, "name", "hostname", default="?"),
+        "model": _pick(a, "model", "part_number", default="-"),
+        "group": _pick(a, "group_name", "group", default="-"),
+        "status": "Up" if _classic_up(_pick(a, "status", "state", default="")) else "Down",
+    } for a in raw]
+    aps = [a for a in aps if a["serial"]]
+    aps.sort(key=lambda a: a["name"].lower())
+    return JSONResponse({"aps": aps})
+
+
+_AP_RADIO_KEYS = ("hostname", "ip_address", "zonename", "achannel", "atxpower",
+                  "gchannel", "gtxpower", "dot11a_radio_disable",
+                  "dot11g_radio_disable", "usb_port_disable")
+
+
+@app.post("/api/config/{flavor}/ap-radio")
+async def config_ap_radio(flavor: str, request: Request) -> JSONResponse:
+    """Per-AP static channel / TX power via AP Settings v2. bands.a = 5 GHz,
+    bands.g = 2.4 GHz; each {channel, power}. Blank = leave, "0" = automatic."""
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Per-AP radio settings are Classic Central only.")
+    b = await request.json()
+    serials = [str(s).strip() for s in (b.get("aps") or []) if str(s).strip()]
+    bands = b.get("bands") or {}
+    a, g = bands.get("a") or {}, bands.get("g") or {}
+    fields: dict[str, str] = {}
+    if a.get("channel") not in (None, ""):
+        fields["achannel"] = str(a["channel"])
+    if a.get("power") not in (None, ""):
+        fields["atxpower"] = str(a["power"])
+    if g.get("channel") not in (None, ""):
+        fields["gchannel"] = str(g["channel"])
+    if g.get("power") not in (None, ""):
+        fields["gtxpower"] = str(g["power"])
+    if not serials:
+        return _err(400, "Select at least one AP.")
+    if not fields:
+        return _err(400, "Set at least one channel or power value.")
+
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    base = f"https://{conn['host']}/configuration/v2/ap_settings"
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=60.0) as cx:
+        for s in serials:
+            cur = await _retry_get(cx, f"{base}/{quote(s, safe='')}", hdr)
+            if cur is None or cur.status_code != 200:
+                results.append({"step": s, "ok": False,
+                                "status": cur.status_code if cur else 0,
+                                "error": "could not read current AP settings"})
+                continue
+            doc = cur.json() if cur.content else {}
+            body = {k: doc.get(k) for k in _AP_RADIO_KEYS if k in doc}
+            body.setdefault("hostname", doc.get("hostname") or "")
+            body.setdefault("ip_address", doc.get("ip_address") or "0.0.0.0")
+            body.update(fields)
+            try:
+                r = await cx.post(f"{base}/{quote(s, safe='')}", headers=hdr, json=body)
+                ok = 200 <= r.status_code < 300
+                results.append({"step": doc.get("hostname") or s, "ok": ok,
+                                "status": r.status_code,
+                                "error": "" if ok else (r.text or "")[:250]})
+            except Exception as exc:
+                results.append({"step": s, "ok": False, "status": 0, "error": str(exc)[:200]})
+    return JSONResponse({"ok": any(x["ok"] for x in results), "results": results})
+
+
 _GROUP_DEV_TYPES = {"AccessPoints", "Gateways", "Switches"}
 _GROUP_SW_TYPES = {"AOS_S", "AOS_CX"}
 

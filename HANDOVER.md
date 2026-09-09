@@ -154,6 +154,9 @@ curl -sk https://<host>/healthz
 | `POST /api/config/{flavor}/cli` | `{cli, groups[], preview, submerge?, managed?, remove?}` — merge/push CLI |
 | `POST /api/config/{flavor}/group` | `{name, password, devTypes[], swTypes[], apRole}` — create a group |
 | `DELETE /api/config/{flavor}/group/{name}` | delete a group |
+| `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
+| `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2 |
+| `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 
 **Loading states** are animated everywhere by default: the overview cards use
 shimmer values + a per-API progress-chip row; drill-down lists render a
@@ -388,10 +391,21 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
   Each distinct profile is written once even if several groups share it; a scope
   with no assigned radio profile is reported and skipped. Verified live
   2026-09-09 (channels + power updated, restored).
-- **Per-AP (individual AP) channel/power is NOT possible** — Central silently
-  drops `ap-name` / `per-ap-settings` / `ap` blocks from an AOS-10 group's
-  AP-CLI, and New Central per-AP overrides are device-scoped local profiles that
-  the API doesn't cleanly expose. The card is group-level only.
+- **Per-AP (individual AP) channel/power — Classic only**, via a "Specific APs"
+  mode toggle on the same card. Uses **AP Settings v2**:
+  `GET /configuration/v2/ap_settings/{serial}` →
+  `{hostname, ip_address, zonename, achannel, atxpower, gchannel, gtxpower,
+  dot11a_radio_disable, dot11g_radio_disable, usb_port_disable}` (`"0"` = ARM /
+  auto). `config_ap_radio` reads that, overlays only the fields the user set
+  (`bands.a` = 5 GHz `achannel`/`atxpower`, `bands.g` = 2.4 GHz
+  `gchannel`/`gtxpower`), and POSTs the whole object back to the same path.
+  `GET /api/config/classic/aps` feeds the picker (name / model / group / status
+  from `/monitoring/v2/aps`). **No 6 GHz** — the v2 API has no field for it.
+  A static channel/power pins that radio (ARM stops managing it). Verified live
+  2026-09-09 (set + read back + restored to "0").
+  - The AOS-10 group-CLI route does NOT work for per-AP: Central silently drops
+    `ap-name` / `per-ap-settings` / `ap` blocks. New Central has no per-AP
+    channel/power via API either (device-scoped local profiles, not exposed).
 
 ## Topology view (frontend)
 
