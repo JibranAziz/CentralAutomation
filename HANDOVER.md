@@ -431,8 +431,10 @@ loaded rule (`time-range`, `throttle`, …) are kept verbatim in a per-row
 `POST /api/config/classic/cli` with **block-replace** (`_merge_cli`, no
 submerge — an ACL is an ordered list you define whole). "Load from" pulls a
 rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
-Verified: view live on a real tenant (53 Classic rules / 66 New policies);
-the push path is the proven SSID `_merge_cli` route.
+**Verified end-to-end 2026-09-09**: preview → deploy → read-back (byte-exact,
+`log`/`alias`/`deny` all preserved) → shows in the list + detail parse →
+delete → gone. Central accepts `wlan access-rule` cleanly. Plus view live
+(53 Classic rules / 66 New policies).
 
 ## Topology view (frontend)
 
