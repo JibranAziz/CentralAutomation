@@ -437,9 +437,9 @@ rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
 delete → gone. Central accepts `wlan access-rule` cleanly. Plus view live
 (53 Classic rules / 66 New policies).
 
-### AP Radios (both flavors)
+### Radio and TX Power (AP radios, both flavors)
 
-An **"AP Radios"** Account Overview card → list, showing each AP's *current*
+A **"Radio and TX Power"** Account Overview card → list, showing each AP's *current*
 (operating) channel, TX power and utilisation per band — the read-only
 counterpart to the Bulk channel & power editor.
 
