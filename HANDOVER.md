@@ -449,8 +449,9 @@ counterpart to the Bulk channel & power editor.
   1 = 5, 3 = 6 GHz.
 - New Central: `_new_central_ap_radios` → `GET /network-monitoring/v1/radios`
   (`items[]`, cursor-paged), grouped by the serial in `id` (`SERIAL/radios/N`);
-  `radioNumber` 0/1/2 → 2.4/5/6 GHz; `power`, `channelUtilization`, `siteName`,
-  `deviceName`.
+  `power`, `channelUtilization`, `siteName`, `deviceName`. Note `radioNumber`
+  here is **0 = 5 GHz, 1 = 2.4 GHz, 2 = 6 GHz** (verified against the Classic
+  reading for a shared AP) — different from the Classic monitoring band codes.
 - List columns: AP / model / group / site / status / per-band channel + power +
   max utilisation. Row → device detail. Search + CSV like every other list.
 

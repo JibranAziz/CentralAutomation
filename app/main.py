@@ -2979,6 +2979,8 @@ _DASH["classic"]["acl"] = _classic_central_acl_detail
 # AP radios — current channel / TX power / utilisation
 # --------------------------------------------------------------------------- #
 _AP_BAND = {0: "24", 1: "5", 2: "6", 3: "6"}
+# New Central /network-monitoring radios: radio 0 = 5 GHz, 1 = 2.4 GHz, 2 = 6 GHz
+_NC_RADIO_BAND = {0: "5", 1: "24", 2: "6"}
 _AP_BAND_LABEL = {"24": "2.4 GHz", "5": "5 GHz", "6": "6 GHz"}
 
 
@@ -3037,7 +3039,7 @@ async def _new_central_ap_radios(host: str, token: str) -> Optional[list[dict[st
             "ch24": "—", "tx24": "—", "u24": "—", "ch5": "—", "tx5": "—", "u5": "—",
             "ch6": "—", "tx6": "—", "u6": "—",
         })
-        b = _AP_BAND.get(r.get("radioNumber"))
+        b = _NC_RADIO_BAND.get(r.get("radioNumber"))
         if not b:
             continue
         d["ch" + b] = str(r.get("channel") or "—")
