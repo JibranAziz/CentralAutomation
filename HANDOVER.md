@@ -158,6 +158,7 @@ curl -sk https://<host>/healthz
 | `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2 |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
+| `GET /api/list/{flavor}/ap-radios` | Per-AP current channel / TX power / utilisation per band (2.4 / 5 / 6 GHz) — read-only |
 
 **Loading states** are animated everywhere by default: the overview cards use
 shimmer values + a per-API progress-chip row; drill-down lists render a
@@ -435,6 +436,23 @@ rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
 `log`/`alias`/`deny` all preserved) → shows in the list + detail parse →
 delete → gone. Central accepts `wlan access-rule` cleanly. Plus view live
 (53 Classic rules / 66 New policies).
+
+### AP Radios (both flavors)
+
+An **"AP Radios"** Account Overview card → list, showing each AP's *current*
+(operating) channel, TX power and utilisation per band — the read-only
+counterpart to the Bulk channel & power editor.
+
+- Classic: `_classic_ap_radios` → `GET /monitoring/v2/aps?show_resource_details=true&limit=1000`.
+  The `show_resource_details=true` param is what makes `radios[]` carry
+  `channel` / `tx_power` / `utilization` / `mode`. Band code → label: 0 = 2.4,
+  1 = 5, 3 = 6 GHz.
+- New Central: `_new_central_ap_radios` → `GET /network-monitoring/v1/radios`
+  (`items[]`, cursor-paged), grouped by the serial in `id` (`SERIAL/radios/N`);
+  `radioNumber` 0/1/2 → 2.4/5/6 GHz; `power`, `channelUtilization`, `siteName`,
+  `deviceName`.
+- List columns: AP / model / group / site / status / per-band channel + power +
+  max utilisation. Row → device detail. Search + CSV like every other list.
 
 ## Topology view (frontend)
 

@@ -798,6 +798,10 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
                 return None, 0
             rows = [_nc_acl_row(x) for x in pol]
             rows.sort(key=lambda r: r["name"].lower())
+        elif entity == "ap-radios":
+            rows = await _new_central_ap_radios(host, token)
+            if rows is None:
+                return None, 0
         else:
             return None, 0
     return rows, total if total is not None else len(rows)
@@ -1475,6 +1479,10 @@ async def _classic_central_list(host: str, token: str, entity: str
             if acls is None:
                 return None, 0
             rows = [_acl_row(nm, e) for nm, e in sorted(acls.items(), key=lambda x: x[0].lower())]
+        elif entity == "ap-radios":
+            rows = await _classic_ap_radios(host, token)
+            if rows is None:
+                return None, 0
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -2123,6 +2131,7 @@ OVERVIEW_GROUPS = {
     "apGroups": ["apGroups"],
     "rfProfiles": ["rfProfiles"],
     "accessRules": ["accessRules"],
+    "apRadios": ["apRadios"],
 }
 
 
@@ -2151,6 +2160,9 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "accessRules":
                 pol = await _new_central_acl_list(host, token)
                 return {"accessRules": len(pol) if pol is not None else None}
+            if group == "apRadios":
+                r = await _new_central_ap_radios(host, token)
+                return {"apRadios": len(r) if r is not None else None}
         else:  # classic
             if group == "clients":
                 tot = 0
@@ -2188,6 +2200,9 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
     if flavor == "classic" and group == "accessRules":
         acls = await _classic_access_rules(host, token)
         return {"accessRules": len(acls) if acls is not None else None}
+    if flavor == "classic" and group == "apRadios":
+        r = await _classic_ap_radios(host, token)
+        return {"apRadios": len(r) if r is not None else None}
     return {}
 
 
@@ -2208,7 +2223,8 @@ async def overview_group(flavor: str, group: str, request: Request) -> JSONRespo
 @app.get("/api/list/{flavor}/{entity}")
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
-                      "subscriptions", "ap-groups", "ssids", "rf-profiles", "access-rules"}:
+                      "subscriptions", "ap-groups", "ssids", "rf-profiles", "access-rules",
+                      "ap-radios"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2957,6 +2973,86 @@ async def _classic_central_acl_detail(host: str, token: str, name: str) -> Optio
 
 
 _DASH["classic"]["acl"] = _classic_central_acl_detail
+
+
+# --------------------------------------------------------------------------- #
+# AP radios — current channel / TX power / utilisation
+# --------------------------------------------------------------------------- #
+_AP_BAND = {0: "24", 1: "5", 2: "6", 3: "6"}
+_AP_BAND_LABEL = {"24": "2.4 GHz", "5": "5 GHz", "6": "6 GHz"}
+
+
+async def _classic_ap_radios(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        raw, _t, sc = await _fetch_all(
+            client, f"https://{host}/monitoring/v2/aps", headers, style="offset",
+            params={"limit": "1000", "show_resource_details": "true"}, item_key="aps")
+    if sc != 200 and not raw:
+        return None
+    rows: list[dict[str, Any]] = []
+    for a in raw:
+        row: dict[str, Any] = {
+            "name": _pick(a, "name", "hostname", default="?"),
+            "serial": _pick(a, "serial", "serial_number", default=""),
+            "model": _pick(a, "model", default="—"),
+            "group": _pick(a, "group_name", "ap_group", "group", default="—"),
+            "site": _pick(a, "site", "site_name", default="—"),
+            "status": "Up" if _classic_up(_pick(a, "status", default="")) else "Down",
+        }
+        for _b in ("24", "5", "6"):
+            row["ch" + _b] = "—"; row["tx" + _b] = "—"; row["u" + _b] = "—"
+        util = []
+        for r in a.get("radios", []) or []:
+            b = _AP_BAND.get(r.get("band"))
+            if not b:
+                continue
+            row["ch" + b] = str(r.get("channel") or "—")
+            tp = r.get("tx_power")
+            row["tx" + b] = f"{tp} dBm" if tp not in (None, "", 0, "0") else "—"
+            u = r.get("utilization")
+            if isinstance(u, (int, float)):
+                row["u" + b] = f"{u}%"
+                util.append(u)
+        row["util"] = f"{max(util)}%" if util else "—"
+        rows.append(row)
+    rows.sort(key=lambda r: r["name"].lower())
+    return rows
+
+
+async def _new_central_ap_radios(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        raw, _t, sc = await _fetch_all(
+            client, f"https://{host}/network-monitoring/v1/radios", headers,
+            style="cursor", item_key="items")
+    if sc != 200 and not raw:
+        return None
+    by: dict[str, dict[str, Any]] = {}
+    for r in raw:
+        serial = str(r.get("id", "")).split("/")[0] or r.get("macAddress", "")
+        d = by.setdefault(serial, {
+            "name": r.get("deviceName") or serial, "serial": serial,
+            "model": "—", "group": "—", "site": r.get("siteName") or "—", "status": "—",
+            "ch24": "—", "tx24": "—", "u24": "—", "ch5": "—", "tx5": "—", "u5": "—",
+            "ch6": "—", "tx6": "—", "u6": "—",
+        })
+        b = _AP_BAND.get(r.get("radioNumber"))
+        if not b:
+            continue
+        d["ch" + b] = str(r.get("channel") or "—")
+        tp = r.get("power")
+        d["tx" + b] = f"{tp} dBm" if tp not in (None, "", "0", 0) else "—"
+        u = r.get("channelUtilization")
+        if u not in (None, ""):
+            d["u" + b] = f"{u}%"
+        if str(r.get("status", "")).upper() == "UP":
+            d["status"] = "Up"
+    rows = sorted(by.values(), key=lambda x: x["name"].lower())
+    for x in rows:
+        us = [int(x[k][:-1]) for k in ("u24", "u5", "u6") if x.get(k, "").endswith("%") and x[k][:-1].isdigit()]
+        x["util"] = f"{max(us)}%" if us else "—"
+    return rows
 
 
 SSID_TEMPLATE = (
