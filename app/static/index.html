@@ -1459,6 +1459,7 @@
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.3" stroke="currentColor" stroke-width="1.4"/><path d="m9.3 9.3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
               <input type="search" id="detail-search" placeholder="Search…" autocomplete="off">
             </span>
+            <div class="chips" id="detail-scope" hidden></div>
             <div class="chips" id="detail-bands" hidden>
               <button class="chip" type="button" data-band="" aria-pressed="true">All</button>
               <button class="chip" type="button" data-band="2.4 GHz" aria-pressed="false">2.4 GHz</button>
@@ -2841,7 +2842,8 @@
     "access-rules": { title: "Access Rules", drill: "acl", idKey: "name", cols: [
       ["name", "Rule / role"], ["type", "Type"], ["rules", "Rules"],
       ["ssids", "Used by SSIDs"], ["groups", "AP Groups"]] },
-    "ap-radios": { title: "Radio and TX Power", drill: "device", idKey: "serial", cols: [
+    "ap-radios": { title: "Radio and TX Power", drill: "device", idKey: "serial",
+      scopes: [["ap-radios", "Access points"], ["ap-radio-groups", "AP groups"]], cols: [
       ["name", "Access point"], ["model", "Model"], ["group", "Group"], ["site", "Site"],
       ["status", "Status"],
       ["ch24", "2.4 GHz ch"], ["tx24", "2.4 GHz power"],
@@ -2852,6 +2854,17 @@
         ["ch24", "2.4 GHz ch"], ["tx24", "2.4 GHz power"],
         ["ch5", "5 GHz ch"], ["tx5", "5 GHz power"],
         ["ch6", "6 GHz ch"], ["tx6", "6 GHz power"], ["util", "Max util"]] } } },
+    "ap-radio-groups": { title: "Radio and TX Power", drill: "group", idKey: "name",
+      scopes: [["ap-radios", "Access points"], ["ap-radio-groups", "AP groups"]], cols: [
+      ["name", "AP group"], ["profile", "RF profile"], ["aps", "APs"],
+      ["ch24", "2.4 GHz channels"], ["tx24", "2.4 GHz power"],
+      ["ch5", "5 GHz channels"], ["tx5", "5 GHz power"],
+      ["ch6", "6 GHz channels"], ["tx6", "6 GHz power"]],
+      byFlavor: { new: { cols: [
+        ["name", "AP group"], ["profile", "RF profile"],
+        ["ch24", "2.4 GHz channels"], ["tx24", "2.4 GHz power"],
+        ["ch5", "5 GHz channels"], ["tx5", "5 GHz power"],
+        ["ch6", "6 GHz channels"], ["tx6", "6 GHz power"]] } } },
     sites: { title: "Sites", drill: "site", idKey: "id", cols: [
       ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
       ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },
@@ -2867,6 +2880,7 @@
   var entityEl = document.getElementById("detail-entity");
   var searchEl = document.getElementById("detail-search");
   var bandsEl = document.getElementById("detail-bands");
+  var scopeEl = document.getElementById("detail-scope");
   var tableEl = document.getElementById("detail-table");
   var countEl = document.getElementById("detail-count");
   var dState = { entity: null, rows: [], band: "", q: "" };
@@ -3024,6 +3038,13 @@
     bandsEl.querySelectorAll(".chip").forEach(function (c) {
       c.setAttribute("aria-pressed", c.getAttribute("data-band") === "" ? "true" : "false");
     });
+    scopeEl.hidden = !def.scopes;
+    if (def.scopes) {
+      scopeEl.innerHTML = def.scopes.map(function (s) {
+        return '<button class="chip" type="button" data-scope="' + s[0] + '" aria-pressed="' +
+          (s[0] === entity ? "true" : "false") + '">' + s[1] + "</button>";
+      }).join("");
+    }
     overviewEl.hidden = true;
     detailEl.hidden = false;
     entityEl.hidden = true;
@@ -3520,6 +3541,11 @@
   searchEl.addEventListener("input", function () {
     dState.q = searchEl.value;
     if (dState.entity) renderDetailTable();
+  });
+  scopeEl.addEventListener("click", function (e) {
+    var chip = e.target.closest(".chip");
+    if (!chip || chip.getAttribute("aria-pressed") === "true") return;
+    openDetail(chip.getAttribute("data-scope"));
   });
   bandsEl.addEventListener("click", function (e) {
     var chip = e.target.closest(".chip");

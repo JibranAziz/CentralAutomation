@@ -454,6 +454,14 @@ counterpart to the Bulk channel & power editor.
   reading for a shared AP) — different from the Classic monitoring band codes.
 - List columns: AP / model / group / site / status / per-band channel + power +
   max utilisation. Row → device detail. Search + CSV like every other list.
+- **Scope toggle** ("Access points" / "AP groups") at the top of the view. The
+  **AP groups** table (`ap-radio-groups` entity) shows the *configured* radio
+  plan per group — allowed channels + min/max TX power per band — the read
+  counterpart of the Bulk channel & power editor. Classic: derived from
+  `_classic_rf_profiles` (the per-group `rf …-radio-profile` blocks), inverted
+  to one row per AP group, plus AP count. New Central: the `radios` library
+  profile(s) assigned to each scope via `config-assignments`. Row → group
+  detail. Values not overridden in Central show as "Regulatory default" / "—".
 
 ## Topology view (frontend)
 

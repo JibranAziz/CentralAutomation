@@ -802,6 +802,10 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
             rows = await _new_central_ap_radios(host, token)
             if rows is None:
                 return None, 0
+        elif entity == "ap-radio-groups":
+            rows = await _new_central_ap_radio_groups(host, token)
+            if rows is None:
+                return None, 0
         else:
             return None, 0
     return rows, total if total is not None else len(rows)
@@ -1481,6 +1485,10 @@ async def _classic_central_list(host: str, token: str, entity: str
             rows = [_acl_row(nm, e) for nm, e in sorted(acls.items(), key=lambda x: x[0].lower())]
         elif entity == "ap-radios":
             rows = await _classic_ap_radios(host, token)
+            if rows is None:
+                return None, 0
+        elif entity == "ap-radio-groups":
+            rows = await _classic_ap_radio_groups(host, token)
             if rows is None:
                 return None, 0
         elif entity == "sites":
@@ -2224,7 +2232,7 @@ async def overview_group(flavor: str, group: str, request: Request) -> JSONRespo
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
                       "subscriptions", "ap-groups", "ssids", "rf-profiles", "access-rules",
-                      "ap-radios"}:
+                      "ap-radios", "ap-radio-groups"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -3054,6 +3062,90 @@ async def _new_central_ap_radios(host: str, token: str) -> Optional[list[dict[st
     for x in rows:
         us = [int(x[k][:-1]) for k in ("u24", "u5", "u6") if x.get(k, "").endswith("%") and x[k][:-1].isdigit()]
         x["util"] = f"{max(us)}%" if us else "—"
+    return rows
+
+
+# --- AP-group-level radio config (the configured channel plan / power caps) --- #
+_RG_BANDS = (("24", "2.4 GHz"), ("5", "5 GHz"), ("6", "6 GHz"))
+
+
+def _rg_row_from_bands(name: str, profile: str, bands: dict[str, dict[str, Any]],
+                       extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    arm = bands.get("ARM", {})
+    row: dict[str, Any] = {"name": name, "profile": profile}
+    for sfx, label in _RG_BANDS:
+        b = bands.get(label, {})
+        ch = b.get("allowed-channels")
+        row["ch" + sfx] = ch if isinstance(ch, str) and ch else "Regulatory default"
+        row["tx" + sfx] = _rf_power(b) or _rf_power(arm) or "—"
+    if extra:
+        row.update(extra)
+    return row
+
+
+async def _classic_ap_radio_groups(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        names, _sc = await _classic_group_names(client, host, headers)
+        if names is None:
+            return None
+        dc = await _classic_group_device_counts(client, host, headers)
+    rp = await _classic_rf_profiles(host, token)
+    if rp is None:
+        return None
+    # group -> merged band settings (group default first, then any named profile applied there)
+    per_group: dict[str, dict[str, dict[str, Any]]] = {g: {} for g in names}
+    named_here: dict[str, set[str]] = {}
+    for key, e in rp.items():
+        for g in e["groups"]:
+            dst = per_group.setdefault(g, {})
+            for label, settings in e["bands"].items():
+                cur = dst.setdefault(label, {})
+                for k, v in settings.items():
+                    cur.setdefault(k, v)
+            if e["named"]:
+                named_here.setdefault(g, set()).add(key)
+    rows = []
+    for g in sorted(per_group, key=str.lower):
+        prof = "Group default"
+        if named_here.get(g):
+            prof = "Group default + " + ", ".join(sorted(named_here[g]))
+        rows.append(_rg_row_from_bands(
+            g, prof, per_group[g], {"aps": dc.get(g, {}).get("aps", 0)}))
+    return rows
+
+
+async def _new_central_ap_radio_groups(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "radios")
+        abody = await _nc_get(client, host, headers, "config-assignments",
+                              {"profile-type": "radios"})
+    if body is None:
+        return None
+    profs = {p.get("name"): p for p in body.get("profile", []) or []}
+    scopes: dict[str, set[str]] = {}
+    for a in (abody or {}).get("config-assignment", []):
+        if a.get("scope-name"):
+            scopes.setdefault(a["scope-name"], set()).add(a.get("profile-instance", ""))
+    rows = []
+    for scope, pnames in sorted(scopes.items(), key=lambda x: x[0].lower()):
+        bands: dict[str, dict[str, Any]] = {}
+        for pn in pnames:
+            for r in (profs.get(pn) or {}).get("radio", []) or []:
+                label = _NC_RADIO_BAND.get(r.get("profile"), "")
+                arm = r.get("arm-control", {}) or {}
+                key = {"2.4 GHz": "24", "5 GHz": "5", "6 GHz": "6"}.get(label)
+                if not key:
+                    continue
+                d = bands.setdefault(label, {})
+                d.setdefault("allowed-channels", _nc_chan_list(arm)
+                             if _nc_chan_list(arm) != "Regulatory default" else "")
+                if arm.get("min-tx-power"):
+                    d.setdefault("min-tx-power", arm.get("min-tx-power"))
+                if arm.get("max-tx-power"):
+                    d.setdefault("max-tx-power", arm.get("max-tx-power"))
+        rows.append(_rg_row_from_bands(scope, ", ".join(sorted(pnames)) or "—", bands))
     return rows
 
 
