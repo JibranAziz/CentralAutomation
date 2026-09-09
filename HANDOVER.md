@@ -157,6 +157,7 @@ curl -sk https://<host>/healthz
 | `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
 | `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2 |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
+| `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
 
 **Loading states** are animated everywhere by default: the overview cards use
 shimmer values + a per-API progress-chip row; drill-down lists render a
@@ -406,6 +407,32 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
   - The AOS-10 group-CLI route does NOT work for per-AP: Central silently drops
     `ap-name` / `per-ap-settings` / `ap` blocks. New Central has no per-AP
     channel/power via API either (device-scoped local profiles, not exposed).
+
+### WLAN access rules / user roles
+
+**View** (both flavors) — an "Access Rules" overview card → list → detail.
+- Classic: `_classic_access_rules` sweeps every group's AP-CLI (cached, same as
+  the SSID/RF sweeps), parses `wlan access-rule <name>` blocks with
+  `_parse_acl_rule` (Instant grammar: `rule <dest> <mask?> match <proto>
+  <a> <b> <action> [opts]` — the address is the *destination*), cross-refs which
+  SSIDs use each role (`essid` name + `set-role*` refs). List: name / type
+  (Permit all · Filtered · Captive portal · Custom) / rule count / used-by SSIDs
+  / groups. Detail: options, the ACE table, used-by SSIDs, groups.
+- New Central: `GET /network-config/v1alpha1/policies` → `security-policy.
+  policy-rule[]` (`condition.source` = ADDRESS_ROLE/ANY, `action` = ACTION_ALLOW/
+  DENY). Most are AOS built-ins (`ap-acl`, `logon-control`, …). View-only.
+
+**Edit** (Classic only) — "Configure access rule" config card (`#aclform`):
+name + `utf8` + optional VLAN / captive-portal, plus a **row builder** — each
+rule is Destination (any / host IP / alias / network) + Service (any / tcp /
+udp / icmp / app + ports) + permit/deny + `log`. Options beyond that on a
+loaded rule (`time-range`, `throttle`, …) are kept verbatim in a per-row
+`data-raw`. `aclToCli` emits the `wlan access-rule` block; pushed via
+`POST /api/config/classic/cli` with **block-replace** (`_merge_cli`, no
+submerge — an ACL is an ordered list you define whole). "Load from" pulls a
+rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
+Verified: view live on a real tenant (53 Classic rules / 66 New policies);
+the push path is the proven SSID `_merge_cli` route.
 
 ## Topology view (frontend)
 

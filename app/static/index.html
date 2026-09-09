@@ -311,6 +311,11 @@
     border-radius: 9px; padding: 10px 12px;
   }
   #config-form input[data-mono] { font-family: var(--mono); font-size: 12.5px; }
+  .acl-row { display: grid; grid-template-columns: 92px 1fr 76px 1fr 78px auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .acl-row select, .acl-row input[type="text"] { padding: 5px 7px; font-size: 12px; border-radius: 7px; min-width: 0; }
+  .acl-row .acl-log { font-size: 12px; white-space: nowrap; }
+  .acl-row .acl-del { font-size: 13px; padding: 0 4px; }
+  @media (max-width: 640px) { .acl-row { grid-template-columns: 1fr 1fr; } }
   .rfp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .rfp-table th, .rfp-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
   .rfp-table thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
@@ -919,6 +924,14 @@
             <div class="s-value dim" data-stat="rfProfiles">—</div>
             <div class="s-more">View all →</div>
           </button>
+          <button class="statcard" type="button" data-entity="access-rules" style="--c:#7c3aed">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13 3.4v4c0 3.3-2.1 5.3-5 6.1-2.9-.8-5-2.8-5-6.1v-4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8h5M5.5 6h5M5.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+              <span class="s-label">Access Rules</span>
+            </div>
+            <div class="s-value dim" data-stat="accessRules">—</div>
+            <div class="s-more">View all →</div>
+          </button>
         </div>
         <div class="dash-actions">
           <span class="upd" id="dash-updated"></span>
@@ -960,8 +973,22 @@
               <div class="stat-top">
                 <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12h2l2-7 3 11 2-7 1 3h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
                 <span class="s-label">Bulk channel &amp; power</span>
+                <button class="statcard" type="button" data-config="acl" style="--c:#7c3aed">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13 3.4v4c0 3.3-2.1 5.3-5 6.1-2.9-.8-5-2.8-5-6.1v-4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8h5M5.5 6h5M5.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+                <span class="s-label">Configure access rule</span>
               </div>
+              <div class="s-sub">Edit a WLAN access rule / user role and push it to AP groups</div>
+            </button>
+          </div>
               <div class="s-sub">Change channel / TX power across selected AP groups</div>
+            </button>
+            <button class="statcard" type="button" data-config="acl" style="--c:#7c3aed">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13 3.4v4c0 3.3-2.1 5.3-5 6.1-2.9-.8-5-2.8-5-6.1v-4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8h5M5.5 6h5M5.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+                <span class="s-label">Configure access rule</span>
+              </div>
+              <div class="s-sub">Edit a WLAN access rule / user role and push it to AP groups</div>
             </button>
           </div>
         </div>
@@ -1087,6 +1114,25 @@
             <em>removed</em> from the group. Use “Load from” first so the form matches the group.</div>
           <div id="rfp-delete-wrap" hidden style="margin-top:12px">
             <button type="button" class="linkbtn danger" id="rfp-delete">Delete this named profile from the selected groups</button>
+          </div>
+        </div>
+
+        <!-- Access rule / user role -->
+        <div id="aclform" hidden>
+          <label class="chk"><input type="checkbox" id="acl-utf8" checked> UTF-8 rule matching</label>
+          <div class="field-row" style="margin-top:8px">
+            <div class="field"><label class="lbl" for="acl-cp">Captive portal profile</label>
+              <input type="text" id="acl-cp" autocomplete="off" placeholder="optional — external CP profile name"></div>
+            <div class="field"><label class="lbl" for="acl-vlan">Override VLAN</label>
+              <input type="text" id="acl-vlan" data-mono autocomplete="off" placeholder="optional"></div>
+          </div>
+          <div class="lbl" style="margin-top:10px">Rules — evaluated top to bottom, first match wins</div>
+          <div id="acl-rules"></div>
+          <button type="button" class="linkbtn" id="acl-add" style="margin-top:4px">+ Add rule</button>
+          <div class="hint" style="margin-top:6px">Options beyond permit/deny + log (time-range, throttle, app-category, …) on a loaded rule are preserved as-is.</div>
+          <details class="gen-cli" style="margin-top:10px"><summary>Generated CLI</summary><pre id="acl-cli-view"></pre></details>
+          <div id="acl-delete-wrap" hidden style="margin-top:12px">
+            <button type="button" class="linkbtn danger" id="acl-delete">Delete this access rule from the selected groups</button>
           </div>
         </div>
 
@@ -1612,7 +1658,7 @@
   var OV_GROUPS = [
     ["clients", "Clients"], ["devices", "Devices"], ["sites", "Sites"],
     ["subscriptions", "Subscriptions"], ["ssids", "SSIDs"], ["apGroups", "AP Groups"],
-    ["rfProfiles", "RF Profiles"]
+    ["rfProfiles", "RF Profiles"], ["accessRules", "Access Rules"]
   ];
   var NEW_ONLY_HIDE = {};   // AP Groups + RF Profiles now available for New Central too
 
@@ -1726,6 +1772,7 @@
       }
     },
     rf: { title: "Configure RF profile", nameLabel: "" },
+    acl: { title: "Configure access rule", nameLabel: "Access rule / role name" },
     group: { title: "Add AP group", nameLabel: "" }
   };
 
@@ -1920,13 +1967,15 @@
     var isRadius = kind === "radius";
     var isRf = kind === "rf";
     var isGroup = kind === "group";
-    var structured = isRadius || isRf || isGroup;
-    document.getElementById("cf-name-wrap").hidden = structured;
+    var isAcl = kind === "acl";
+    var structured = isRadius || isRf || isGroup || isAcl;
+    document.getElementById("cf-name-wrap").hidden = structured && !isAcl;
     document.getElementById("cf-cli-wrap").hidden = structured;
     document.getElementById("cf-reset-tpl").hidden = structured;
     document.getElementById("rform").hidden = !isRadius;
     document.getElementById("rfp-form").hidden = !isRf;
     document.getElementById("grp-form").hidden = !isGroup;
+    document.getElementById("aclform").hidden = !isAcl;
     document.getElementById("rf-cli-details").hidden = !(isRadius || isRf);
     document.getElementById("cf-load-name").hidden = false;
     // the shared deploy machinery is not used for "Add AP group"
@@ -1937,6 +1986,8 @@
     if (isRadius) { rformDefaults(); rformToCli(); }
     else if (isRf) { rfpDefaults(); rfpToCli(); }
     else if (isGroup) { grpReset(); }
+    else if (isAcl) { aclReset(); }
+    else if (isAcl) { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     else { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     nameEl.value = "";
     if (!structured) applyTemplate();
@@ -2007,12 +2058,14 @@
   });
   function blockPrefix() {
     return cfgKind === "ssid" ? "wlan ssid-profile"
-      : cfgKind === "rf" ? "rf dot11a-radio-profile" : "wlan auth-server";
+      : cfgKind === "rf" ? "rf dot11a-radio-profile"
+      : cfgKind === "acl" ? "wlan access-rule" : "wlan auth-server";
   }
   function blockHeaders(name) {
     if (cfgKind === "rf") return rfpHeaders();
     var n = (name || nameEl.value).trim();
     if (!n) return [];
+    if (cfgKind === "acl") return ["wlan access-rule " + n];
     return cfgKind === "ssid"
       ? ["wlan ssid-profile " + n, "wlan access-rule " + n]
       : ["wlan auth-server " + n];
@@ -2119,6 +2172,10 @@
       if (!res.body.cli) { note.textContent = '"' + picked + '" not found in ' + g + "."; return; }
       if (cfgKind === "radius") {
         fillRformFromCli(res.body.cli);
+      } else if (cfgKind === "acl") {
+        nameEl.value = picked;
+        fillAclFromCli(res.body.cli);
+        aclLoadedName = picked;
       } else {
         nameEl.value = picked;
         cliEl.value = res.body.cli.replace(/\s+$/, "") + "\n";
@@ -2168,6 +2225,11 @@
         cfgErr("Select at least one band to configure."); return;
       }
       if (!cliEl.value.trim()) { cfgErr("Set at least one radio option."); return; }
+    }
+    if (cfgKind === "acl") {
+      if (!nameEl.value.trim()) { cfgErr("Access rule name is required."); return; }
+      aclToCli();
+      if (!aclRuleCount()) { cfgErr("Add at least one rule."); return; }
     }
     var groups = selectedGroups();
     var cli = cliEl.value.trim();
@@ -2221,6 +2283,145 @@
   }
   document.getElementById("config-preview").addEventListener("click", function () { runConfig(true); });
   document.getElementById("config-apply").addEventListener("click", function () { runConfig(false); });
+
+  /* ---- Access rule / user role editor ---- */
+  var aclLoadedName = "";
+  var ACL_DEST = [["any", "Any"], ["host", "Host IP"], ["alias", "Hostname / alias"], ["net", "Network"]];
+  var ACL_SVC = [["any", "Any"], ["tcp", "TCP"], ["udp", "UDP"], ["icmp", "ICMP"], ["app", "App"]];
+  function aclEl(id) { return document.getElementById("acl-" + id); }
+  function aclReset() {
+    aclEl("utf8").checked = true;
+    aclEl("cp").value = ""; aclEl("vlan").value = "";
+    aclEl("rules").innerHTML = "";
+    aclAddRow({});
+    aclEl("delete-wrap").hidden = true;
+    aclLoadedName = "";
+    aclToCli();
+  }
+  function aclOpt(list, val) {
+    return list.map(function (o) {
+      return '<option value="' + o[0] + '"' + (o[0] === val ? " selected" : "") + '>' + o[1] + '</option>';
+    }).join("");
+  }
+  function aclAddRow(r) {
+    var d = document.createElement("div");
+    d.className = "acl-row";
+    d.innerHTML =
+      '<select class="acl-dest">' + aclOpt(ACL_DEST, r.dest || "any") + '</select>' +
+      '<input type="text" class="acl-dest-v" data-mono placeholder="10.0.0.5 / *.example.com" value="' + (r.destv || "").replace(/"/g, "&quot;") + '">' +
+      '<select class="acl-svc">' + aclOpt(ACL_SVC, r.svc || "any") + '</select>' +
+      '<input type="text" class="acl-svc-v" data-mono placeholder="443 or 443-445 / youtube" value="' + (r.svcv || "").replace(/"/g, "&quot;") + '">' +
+      '<select class="acl-act"><option value="permit"' + (r.act === "deny" ? "" : " selected") + '>permit</option><option value="deny"' + (r.act === "deny" ? " selected" : "") + '>deny</option></select>' +
+      '<label class="chk acl-log"><input type="checkbox" class="acl-log-cb"' + (r.log ? " checked" : "") + '> log</label>' +
+      '<button type="button" class="linkbtn danger acl-del">✕</button>';
+    d.setAttribute("data-raw", r.raw || "");
+    aclEl("rules").appendChild(d);
+    d.querySelectorAll("select,input").forEach(function (x) {
+      x.addEventListener("input", aclToCli); x.addEventListener("change", aclToCli);
+    });
+    d.querySelector(".acl-del").addEventListener("click", function () { d.remove(); aclToCli(); });
+  }
+  document.getElementById("acl-add").addEventListener("click", function () { aclAddRow({}); aclToCli(); });
+  ["acl-utf8", "acl-cp", "acl-vlan"].forEach(function (id) {
+    var e = document.getElementById(id);
+    e.addEventListener("input", aclToCli); e.addEventListener("change", aclToCli);
+  });
+  function aclRuleCount() { return aclEl("rules").querySelectorAll(".acl-row").length; }
+  function aclDestCli(row) {
+    var t = row.querySelector(".acl-dest").value, v = row.querySelector(".acl-dest-v").value.trim();
+    if (t === "any" || !v) return "any any";
+    if (t === "alias") return "alias " + v;
+    if (t === "net") return v;                 // expects "10.0.0.0 255.0.0.0"
+    return v + " 255.255.255.255";             // host
+  }
+  function aclSvcCli(row) {
+    var t = row.querySelector(".acl-svc").value, v = row.querySelector(".acl-svc-v").value.trim();
+    if (t === "any") return "any any any";
+    if (t === "icmp") return "icmp any any";
+    if (t === "app") return "app " + (v || "any");
+    var pr = v.split(/[-\s]+/); var a = pr[0] || "0"; var b = pr[1] || a;
+    return t + " " + a + " " + b;
+  }
+  function aclToCli() {
+    var n = nameEl.value.trim() || "New-Role";
+    var q = /\s/.test(n) ? '"' + n + '"' : n;
+    var L = ["wlan access-rule " + q];
+    if (aclEl("utf8").checked) L.push("  utf8");
+    if (aclEl("vlan").value.trim()) L.push("  vlan " + aclEl("vlan").value.trim());
+    if (aclEl("cp").value.trim()) {
+      var cp = aclEl("cp").value.trim();
+      L.push("  captive-portal external profile " + (/\s/.test(cp) ? '"' + cp + '"' : cp));
+    }
+    aclEl("rules").querySelectorAll(".acl-row").forEach(function (row) {
+      var extra = row.getAttribute("data-raw") || "";
+      var log = row.querySelector(".acl-log-cb").checked && !/\blog\b/.test(extra) ? " log" : "";
+      L.push("  rule " + aclDestCli(row) + " match " + aclSvcCli(row) + " " +
+        row.querySelector(".acl-act").value + log + (extra ? " " + extra : ""));
+    });
+    cliEl.value = L.join("\n") + "\n";
+    aclEl("cli-view").textContent = cliEl.value;
+  }
+  function fillAclFromCli(txt) {
+    aclEl("utf8").checked = false; aclEl("cp").value = ""; aclEl("vlan").value = "";
+    aclEl("rules").innerHTML = "";
+    txt.split("\n").forEach(function (line) {
+      var t = line.trim(), m;
+      if (t === "utf8") aclEl("utf8").checked = true;
+      else if ((m = t.match(/^vlan (.+)$/))) aclEl("vlan").value = m[1];
+      else if ((m = t.match(/^captive-portal external profile "?([^"]+)"?$/))) aclEl("cp").value = m[1];
+      else if (t.indexOf("rule ") === 0) {
+        var p = t.split(/\s+/).slice(1);
+        var mi = p.indexOf("match");
+        if (mi < 0) return;
+        var src = p.slice(0, mi), rest = p.slice(mi + 1);
+        var acts = ["permit", "deny", "src-nat", "dst-nat"];
+        var ai = rest.findIndex(function (x) { return acts.indexOf(x) !== -1; });
+        if (ai < 0) return;
+        var proto = rest.slice(0, ai), act = rest[ai], opts = rest.slice(ai + 1);
+        var r = { act: act === "deny" ? "deny" : "permit" };
+        if (!src.length || src[0] === "any") { r.dest = "any"; }
+        else if (src[0] === "alias") { r.dest = "alias"; r.destv = src.slice(1).join(" "); }
+        else if (src[1] === "255.255.255.255") { r.dest = "host"; r.destv = src[0]; }
+        else { r.dest = "net"; r.destv = src.join(" "); }
+        if (!proto.length || proto[0] === "any") { r.svc = "any"; }
+        else if (proto[0] === "icmp") { r.svc = "icmp"; }
+        else if (proto[0] === "app" || proto[0] === "appcategory") { r.svc = "app"; r.svcv = proto.slice(1).join(" "); }
+        else if (proto[0] === "tcp" || proto[0] === "udp") {
+          r.svc = proto[0];
+          r.svcv = proto[1] === proto[2] ? (proto[1] || "") : ((proto[1] || "") + "-" + (proto[2] || ""));
+        } else { r.svc = "any"; }
+        r.log = opts.indexOf("log") !== -1;
+        r.raw = opts.filter(function (x) { return x !== "log"; }).join(" ");
+        aclAddRow(r);
+      }
+    });
+    if (!aclRuleCount()) aclAddRow({});
+    aclEl("delete-wrap").hidden = false;
+    aclToCli();
+  }
+  document.getElementById("acl-delete").addEventListener("click", function () {
+    var n = nameEl.value.trim();
+    if (!n) return;
+    var groups = selectedGroups();
+    if (!groups.length) { cfgErr("Select the AP groups to delete it from."); return; }
+    if (!window.confirm('Delete access rule "' + n + '" from ' + groups.length + ' group(s)?')) return;
+    var btn = this; btn.disabled = true; btn.textContent = "Deleting…";
+    resultsEl.innerHTML = "";
+    api("/api/config/" + activeFlavor + "/cli", {
+      method: "POST", body: JSON.stringify({ remove: ["wlan access-rule " + n], groups: groups, preview: false })
+    }).then(function (res) {
+      if (!res.ok) { cfgErr((res.body && res.body.error) || "Request failed."); return; }
+      (res.body.results || []).forEach(function (r) {
+        var row = document.createElement("div"); row.className = "cres " + (r.ok ? "ok" : "bad");
+        row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
+        row.querySelector(".cr-grp").textContent = r.group;
+        row.querySelector(".cr-msg").textContent = r.ok ? "deleted" : ("failed (" + r.status + ") " + (r.error || "")).trim();
+        resultsEl.appendChild(row);
+      });
+      overviewLoaded[activeFlavor] = false;
+    }).catch(function () { cfgErr("Network error."); })
+      .finally(function () { btn.disabled = false; btn.textContent = "Delete this access rule from the selected groups"; });
+  });
 
   document.getElementById("rfp-delete").addEventListener("click", function () {
     cfgErr("");
@@ -2635,6 +2836,9 @@
     "rf-profiles": { title: "RF Profiles", drill: "rf", idKey: "name", cols: [
       ["name", "RF Profile"], ["scope", "Scope"], ["radios", "Radios"],
       ["txpower", "TX power (5 GHz)"], ["groups", "AP Groups"]] },
+    "access-rules": { title: "Access Rules", drill: "acl", idKey: "name", cols: [
+      ["name", "Rule / role"], ["type", "Type"], ["rules", "Rules"],
+      ["ssids", "Used by SSIDs"], ["groups", "AP Groups"]] },
     sites: { title: "Sites", drill: "site", idKey: "id", cols: [
       ["name", "Site"], ["clientHealth", "Clients"], ["deviceHealth", "Devices"],
       ["clients", "Total clients"], ["devices", "Total devices"], ["alerts", "Alerts"]] },

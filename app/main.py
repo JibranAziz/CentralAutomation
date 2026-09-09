@@ -792,6 +792,12 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
                 row["groups"] = ", ".join(sorted(used.get(p.get("name", ""), []))) or "—"
                 rows.append(row)
             rows.sort(key=lambda r: r["name"].lower())
+        elif entity == "access-rules":
+            pol = await _new_central_acl_list(host, token)
+            if pol is None:
+                return None, 0
+            rows = [_nc_acl_row(x) for x in pol]
+            rows.sort(key=lambda r: r["name"].lower())
         else:
             return None, 0
     return rows, total if total is not None else len(rows)
@@ -1011,6 +1017,68 @@ async def _new_central_rf_detail(host: str, token: str, name: str) -> Optional[d
     }
 
 
+_NC_ADDR = {"ADDRESS_ANY": "any", "ADDRESS_ROLE": "role", "ADDRESS_ALIAS": "alias",
+            "ADDRESS_USER": "user", "ADDRESS_IP": "ip", "ADDRESS_NETWORK": "network"}
+
+
+def _nc_addr(a: dict[str, Any]) -> str:
+    if not a:
+        return "any"
+    t = _NC_ADDR.get(a.get("type"), (a.get("type") or "").replace("ADDRESS_", "").lower() or "any")
+    v = a.get("role") or a.get("alias") or a.get("name") or a.get("ip") or a.get("value")
+    return f"{t} {v}" if v else t
+
+
+async def _new_central_acl_list(host: str, token: str) -> Optional[list[dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "policies")
+    if body is None:
+        return None
+    return body.get("policy", [])
+
+
+def _nc_acl_row(p: dict[str, Any]) -> dict[str, Any]:
+    rules = ((p.get("security-policy") or {}).get("policy-rule")) or p.get("policy-rule") or []
+    return {
+        "name": p.get("name") or "—",
+        "rules": len(rules),
+        "type": (p.get("type") or "").replace("POLICY_TYPE_", "").title() or "—",
+        "ssids": "—",
+        "groups": "—",
+    }
+
+
+async def _new_central_acl_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        body = await _nc_get(client, host, headers, "policies")
+        abody = await _nc_get(client, host, headers, "config-assignments",
+                              {"profile-type": "policies"})
+    p = next((x for x in (body or {}).get("policy", []) if x.get("name") == name), None)
+    if p is None:
+        return None
+    rules = ((p.get("security-policy") or {}).get("policy-rule")) or p.get("policy-rule") or []
+    ace = []
+    for r in sorted(rules, key=lambda r: r.get("position", 0)):
+        c = r.get("condition") or {}
+        act = (r.get("action") or {}).get("type", "").replace("ACTION_", "") or "?"
+        ace.append([str(r.get("position", len(ace) + 1)),
+                    f"{act}  ·  src {_nc_addr(c.get('source'))}  ·  dst {_nc_addr(c.get('destination'))}"
+                    + (f"  ·  {r.get('description')}" if r.get("description") else "")])
+    used = sorted({a.get("scope-name") for a in (abody or {}).get("config-assignment", [])
+                  if a.get("profile-instance") == name and a.get("scope-name")})
+    groups = [
+        {"label": "Policy", "fields": [
+            ["Type", (p.get("type") or "").replace("POLICY_TYPE_", "").title() or "—"],
+            ["Description", p.get("description") or "—"]]},
+        {"label": f"Rules ({len(ace)})", "fields": ace or [["—", "no rules"]]},
+        {"label": "Assigned to", "fields": [["Scopes", ", ".join(used) or "—"]]},
+    ]
+    return {"title": name, "subtitle": "Security policy", "status": "",
+            "groups": groups, "devices": [], "meta": {"kind": "acl"}}
+
+
 async def _classic_central_devices(host: str, token: str) -> Optional[dict[str, dict[str, int]]]:
     """Tally devices by category / status for Classic Central (best-effort)."""
     tally = _empty_devices()
@@ -1197,7 +1265,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
         "gateways": None, "sites": None, "subscriptions": None,
-        "apGroups": None, "ssids": None, "rfProfiles": None,
+        "apGroups": None, "ssids": None, "rfProfiles": None, "accessRules": None,
     }
     probes = {
         "accessPoints": "/monitoring/v2/aps",
@@ -1248,6 +1316,11 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
     try:
         rp = await _classic_rf_profiles(host, token)
         out["rfProfiles"] = len(rp) if rp else None
+    except Exception:
+        pass
+    try:
+        acls = await _classic_access_rules(host, token)
+        out["accessRules"] = len(acls) if acls else None
     except Exception:
         pass
     return out
@@ -1397,6 +1470,11 @@ async def _classic_central_list(host: str, token: str, entity: str
                     "txpower": _rf_power(a) or "—",
                     "groups": ", ".join(sorted(e["groups"])) or "—",
                 })
+        elif entity == "access-rules":
+            acls = await _classic_access_rules(host, token)
+            if acls is None:
+                return None, 0
+            rows = [_acl_row(nm, e) for nm, e in sorted(acls.items(), key=lambda x: x[0].lower())]
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
                 client, f"https://{host}/central/v2/sites", headers, style="offset",
@@ -2003,7 +2081,7 @@ _DASH = {
         "client": _new_central_client_detail, "device": _new_central_device_detail,
         "site": _new_central_site_detail, "topology": _new_central_topology,
         "ssid": _new_central_ssid_detail, "group": _new_central_group_detail,
-        "rf": _new_central_rf_detail,
+        "rf": _new_central_rf_detail, "acl": _new_central_acl_detail,
     },
     "classic": {
         "overview": _classic_central_overview, "list": _classic_central_list,
@@ -2044,6 +2122,7 @@ OVERVIEW_GROUPS = {
     "ssids": ["ssids"],
     "apGroups": ["apGroups"],
     "rfProfiles": ["rfProfiles"],
+    "accessRules": ["accessRules"],
 }
 
 
@@ -2069,6 +2148,9 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "rfProfiles":
                 rf = await _new_central_rf_list(host, token)
                 return {"rfProfiles": len(rf) if rf is not None else None}
+            if group == "accessRules":
+                pol = await _new_central_acl_list(host, token)
+                return {"accessRules": len(pol) if pol is not None else None}
         else:  # classic
             if group == "clients":
                 tot = 0
@@ -2103,6 +2185,9 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
     if flavor == "classic" and group == "rfProfiles":
         rp = await _classic_rf_profiles(host, token)
         return {"rfProfiles": len(rp) if rp is not None else None}
+    if flavor == "classic" and group == "accessRules":
+        acls = await _classic_access_rules(host, token)
+        return {"accessRules": len(acls) if acls is not None else None}
     return {}
 
 
@@ -2123,7 +2208,7 @@ async def overview_group(flavor: str, group: str, request: Request) -> JSONRespo
 @app.get("/api/list/{flavor}/{entity}")
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
-                      "subscriptions", "ap-groups", "ssids", "rf-profiles"}:
+                      "subscriptions", "ap-groups", "ssids", "rf-profiles", "access-rules"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2136,7 +2221,7 @@ async def list_entity(flavor: str, entity: str, request: Request) -> JSONRespons
 
 @app.get("/api/detail/{flavor}/{kind}/{ident}")
 async def detail(flavor: str, kind: str, ident: str, request: Request) -> JSONResponse:
-    if kind not in ("client", "device", "site", "group", "ssid", "rf"):
+    if kind not in ("client", "device", "site", "group", "ssid", "rf", "acl"):
         return _err(404, "Unknown detail type.")
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2714,6 +2799,164 @@ async def _classic_central_rf_detail(host: str, token: str, name: str) -> Option
 
 
 _DASH["classic"]["rf"] = _classic_central_rf_detail
+
+
+# --------------------------------------------------------------------------- #
+# WLAN access rules / user roles (Classic Instant AP-CLI)
+# --------------------------------------------------------------------------- #
+_ACL_ACTIONS = {"permit", "deny", "src-nat", "dst-nat"}
+
+
+def _parse_acl_rule(t: str) -> dict[str, str]:
+    """`rule <dest> <mask?> match <proto> <a> <b> <action> [opts...]`.
+    In Instant `wlan access-rule` the address is the *destination* (client-out)."""
+    toks = t.strip().split()
+    if not toks or toks[0] != "rule":
+        return {"dest": "", "service": "", "action": "", "opts": "", "raw": t.strip()}
+    parts = toks[1:]
+    try:
+        mi = parts.index("match")
+    except ValueError:
+        return {"dest": "", "service": " ".join(parts), "action": "", "opts": "", "raw": t.strip()}
+    src, rest = parts[:mi], parts[mi + 1:]
+    if not src:
+        dest = "any"
+    elif src[0] == "any":
+        dest = "any"
+    elif src[0] == "alias":
+        dest = "alias " + " ".join(src[1:])
+    elif src[0] in ("masterip", "user", "mswitch", "localip"):
+        dest = src[0]
+    elif len(src) >= 2 and re.match(r"\d+\.\d+\.\d+\.\d+", src[0]):
+        dest = src[0] if src[1] == "255.255.255.255" else " ".join(src[:2])
+    else:
+        dest = " ".join(src)
+    ai = next((i for i, x in enumerate(rest) if x in _ACL_ACTIONS), None)
+    if ai is None:
+        return {"dest": dest, "service": " ".join(rest), "action": "", "opts": "", "raw": t.strip()}
+    svc = " ".join(rest[:ai]).replace("any any", "any").strip() or "any"
+    return {"dest": dest, "service": svc, "action": rest[ai], "opts": " ".join(rest[ai + 1:])}
+
+
+def _cli_access_rules(clis: Optional[list[str]]) -> dict[str, dict[str, Any]]:
+    """`wlan access-rule <name>` blocks -> {name: {opts:[non-rule lines], rules:[parsed]}}."""
+    out: dict[str, dict[str, Any]] = {}
+    for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
+        head = blk[0].strip()
+        if not head.startswith("wlan access-rule "):
+            continue
+        name = _unquote(head[len("wlan access-rule "):])
+        e = out.setdefault(name, {"opts": [], "rules": []})
+        for ln in blk[1:]:
+            t = ln.strip()
+            if t.startswith("rule "):
+                e["rules"].append(_parse_acl_rule(t))
+            elif t:
+                e["opts"].append(t)
+    return out
+
+
+def _cli_ssid_roles(clis: Optional[list[str]]) -> dict[str, set[str]]:
+    """essid -> set of role names it uses (implicit = essid name, plus set-role* refs)."""
+    out: dict[str, set[str]] = {}
+    for blk in _cli_blocks(_cli_lines("\n".join(clis or []))):
+        head = blk[0].strip()
+        if not head.startswith("wlan ssid-profile "):
+            continue
+        prof = _unquote(head[len("wlan ssid-profile "):])
+        essid = prof
+        roles: set[str] = set()
+        for ln in blk[1:]:
+            t = ln.strip()
+            if t.startswith("essid "):
+                essid = _unquote(t[6:])
+            m = re.match(r"set-role(?:-pre-auth|-unrestricted|-mac-auth)?\b.*?(\S+)\s*$", t)
+            if t.startswith("set-role") and m:
+                roles.add(_unquote(m.group(1)))
+        roles.add(essid)
+        out.setdefault(essid, set()).update(roles)
+    return out
+
+
+async def _classic_access_rules(host: str, token: str) -> Optional[dict[str, dict[str, Any]]]:
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    out: dict[str, dict[str, Any]] = {}
+    ssid_roles: dict[str, set[str]] = {}
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        names, _sc = await _classic_group_names(client, host, headers)
+        if names is None:
+            return None
+        sem = asyncio.Semaphore(5)
+
+        async def _grp(g: str) -> tuple[str, dict[str, dict[str, Any]], dict[str, set[str]]]:
+            async with sem:
+                clis, _s, _m = await _ap_cli_get(client, host, headers, g, tries=5, sweep=True, use_cache=True)
+                return g, _cli_access_rules(clis), _cli_ssid_roles(clis)
+
+        async with _AP_CLI_SWEEP_LOCK:
+            swept = await asyncio.gather(*[_grp(n) for n in names])
+    for g, acls, sr in swept:
+        for nm, info in acls.items():
+            e = out.setdefault(nm, {"opts": [], "rules": [], "groups": set(), "ssids": set()})
+            e["groups"].add(g)
+            if not e["rules"] and info["rules"]:
+                e["rules"] = info["rules"]
+            if not e["opts"] and info["opts"]:
+                e["opts"] = info["opts"]
+        for essid, roles in sr.items():
+            for r in roles:
+                ssid_roles.setdefault(r, set()).add(essid)
+    for nm, e in out.items():
+        e["ssids"] = ssid_roles.get(nm, set())
+    return out
+
+
+def _acl_kind(e: dict[str, Any]) -> str:
+    if any("captive-portal" in o for o in e.get("opts", [])):
+        return "Captive portal"
+    if any(r.get("action") == "deny" for r in e.get("rules", [])):
+        return "Filtered"
+    if len(e.get("rules", [])) == 1 and e["rules"][0].get("dest") == "any" \
+            and e["rules"][0].get("action") == "permit":
+        return "Permit all"
+    return "Custom"
+
+
+def _acl_row(name: str, e: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "rules": len(e.get("rules", [])),
+        "type": _acl_kind(e),
+        "ssids": ", ".join(sorted(e.get("ssids", []))) or "—",
+        "groups": ", ".join(sorted(e.get("groups", []))) or "—",
+    }
+
+
+async def _classic_central_acl_detail(host: str, token: str, name: str) -> Optional[dict[str, Any]]:
+    acls = await _classic_access_rules(host, token)
+    e = (acls or {}).get(name)
+    if e is None:
+        return None
+    groups: list[dict[str, Any]] = []
+    if e.get("opts"):
+        groups.append({"label": "Options", "fields": [[o.split()[0], o] for o in e["opts"]]})
+    ace_fields = []
+    for i, r in enumerate(e.get("rules", []), 1):
+        val = f"{r.get('action', '?')}  ·  dest {r.get('dest') or 'any'}  ·  {r.get('service') or 'any'}"
+        if r.get("opts"):
+            val += f"  ·  {r['opts']}"
+        ace_fields.append([str(i), val])
+    groups.append({"label": f"Rules ({len(ace_fields)})",
+                   "fields": ace_fields or [["—", "no rules"]]})
+    groups.append({"label": "Used by SSIDs", "fields": [["SSIDs", ", ".join(sorted(e.get("ssids", []))) or "—"]]})
+    groups.append({"label": "In AP groups", "fields": [["Groups", ", ".join(sorted(e.get("groups", []))) or "—"]]})
+    return {
+        "title": name, "subtitle": _acl_kind(e) + " access rule", "status": "",
+        "groups": groups, "devices": [], "meta": {"kind": "acl"},
+    }
+
+
+_DASH["classic"]["acl"] = _classic_central_acl_detail
 
 
 SSID_TEMPLATE = (
