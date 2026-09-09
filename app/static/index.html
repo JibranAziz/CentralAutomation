@@ -523,6 +523,17 @@
   table.dtable tr.clickable { cursor: pointer; }
   table.dtable tr.clickable td:first-child { color: var(--accent); font-weight: 500; }
   .rowchevron { color: var(--faint); }
+  table.dtable td.chwrap { overflow-wrap: anywhere; word-break: break-word; min-width: 150px; }
+  .roweditcell { width: 1%; white-space: nowrap; text-align: right; }
+  .rowedit {
+    appearance: none; background: none; border: none; cursor: pointer; padding: 4px;
+    border-radius: 6px; color: var(--faint); line-height: 0;
+    transition: color .1s, background .1s;
+  }
+  .rowedit:hover { color: var(--accent); background: var(--accent-wash); }
+  table.dtable tbody tr:hover .rowedit { color: var(--muted); }
+  /* wide break-out for many-column drill-downs (Radio and TX Power) */
+  #dash-detail.wide { width: min(96vw, 1560px); margin-left: calc(50% - min(96vw, 1560px) / 2); }
 
   #entity-groups {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -2618,9 +2629,25 @@
         box.appendChild(l);
       });
     if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No AP groups.</p>';
+    brApplyPreselect("brg");
   }
   var brGroupCache = [];
-  var brMode = "groups", brApCache = [];
+  var brMode = "groups", brApCache = [], brPreselect = null;
+  function brApplyPreselect(cls) {
+    if (!brPreselect) return;
+    var want = String(brPreselect.name || "");
+    var wantId = String(brPreselect.id == null ? "" : brPreselect.id);
+    var hit = null;
+    document.querySelectorAll("#br-" + (cls === "brg" ? "groups" : "aps") + " ." + cls).forEach(function (cb) {
+      var m = cb.getAttribute("data-name") === want || cb.value === wantId;
+      cb.checked = m;
+      if (m) hit = cb;
+    });
+    if (hit) {
+      brPreselect = null;
+      if (hit.closest("label")) hit.closest("label").scrollIntoView({ block: "nearest" });
+    }
+  }
   function brSetMode(m) {
     brMode = m;
     document.querySelectorAll("#br-mode .chip").forEach(function (c) {
@@ -2659,9 +2686,11 @@
       box.appendChild(l);
     });
     if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No APs.</p>';
+    brApplyPreselect("bra");
   }
-  function openBulkRadio(flavor) {
+  function openBulkRadio(flavor, pre) {
     brFlavor = flavor;
+    brPreselect = pre || null;
     brForm.hidden = false;
     document.getElementById("config-section").hidden = true;
     document.getElementById("nc-config-section").hidden = true;
@@ -2676,7 +2705,7 @@
       document.getElementById(id).value = "";
     });
     brApCache = [];
-    brSetMode("groups");
+    brSetMode(pre && pre.mode === "aps" && flavor === "classic" ? "aps" : "groups");
     var box = document.getElementById("br-groups");
     box.innerHTML = '<p class="cgroup-count">Loading…</p>';
     var url = flavor === "classic" ? "/api/config/classic/groups" : "/api/nc-config/scopes";
@@ -2842,7 +2871,8 @@
     "access-rules": { title: "Access Rules", drill: "acl", idKey: "name", cols: [
       ["name", "Rule / role"], ["type", "Type"], ["rules", "Rules"],
       ["ssids", "Used by SSIDs"], ["groups", "AP Groups"]] },
-    "ap-radios": { title: "Radio and TX Power", drill: "device", idKey: "serial",
+    "ap-radios": { title: "Radio and TX Power", drill: "device", idKey: "serial", wide: true,
+      edit: { mode: "aps", flavors: ["classic"] },
       scopes: [["ap-radios", "Access points"], ["ap-radio-groups", "AP groups"]], cols: [
       ["name", "Access point"], ["model", "Model"], ["group", "Group"], ["site", "Site"],
       ["status", "Status"],
@@ -2854,7 +2884,8 @@
         ["ch24", "2.4 GHz ch"], ["tx24", "2.4 GHz power"],
         ["ch5", "5 GHz ch"], ["tx5", "5 GHz power"],
         ["ch6", "6 GHz ch"], ["tx6", "6 GHz power"], ["util", "Max util"]] } } },
-    "ap-radio-groups": { title: "Radio and TX Power", drill: "group", idKey: "name",
+    "ap-radio-groups": { title: "Radio and TX Power", drill: "group", idKey: "name", wide: true,
+      edit: { mode: "groups" },
       scopes: [["ap-radios", "Access points"], ["ap-radio-groups", "AP groups"]], cols: [
       ["name", "AP group"], ["profile", "RF profile"], ["aps", "APs"],
       ["ch24", "2.4 GHz channels"], ["tx24", "2.4 GHz power"],
@@ -2937,13 +2968,15 @@
       th.textContent = c[1];
       htr.appendChild(th);
     });
+    var showEdit = def.edit && (!def.edit.flavors || def.edit.flavors.indexOf(activeFlavor) !== -1);
+    if (showEdit) htr.appendChild(document.createElement("th"));
     if (def.drill) htr.appendChild(document.createElement("th"));
 
     tbody.innerHTML = "";
     if (!rows.length) {
       var tr = tbody.insertRow();
       var td = tr.insertCell();
-      td.colSpan = def.cols.length + (def.drill ? 1 : 0);
+      td.colSpan = def.cols.length + (showEdit ? 1 : 0) + (def.drill ? 1 : 0);
       td.className = "empty";
       td.textContent = dState.rows.length ? "No matches." : "Nothing to show.";
     } else {
@@ -2964,7 +2997,21 @@
           if (c[0] === "clientHealth" || c[0] === "deviceHealth") { td.appendChild(healthCell(v)); return; }
           td.textContent = (v == null || v === "") ? "—" : String(v);
           if (MONO_KEYS[c[0]]) td.className = "mono";
+          else if (/^ch(24|5|6)$/.test(c[0])) td.className = "chwrap";
         });
+        if (showEdit) {
+          var ec = tr.insertCell();
+          ec.className = "roweditcell";
+          var eb = document.createElement("button");
+          eb.type = "button"; eb.className = "rowedit"; eb.title = "Edit channel / TX power";
+          eb.setAttribute("aria-label", "Edit " + (r.name || ""));
+          eb.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2M2.5 13.5l.7-2.8 7-7 2 2-7 7-2.7.8z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+          eb.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            openBulkRadio(activeFlavor, { mode: def.edit.mode, id: r[def.idKey], name: r.name });
+          });
+          ec.appendChild(eb);
+        }
         if (def.drill) {
           var cd = tr.insertCell();
           cd.className = "rowchevron";
@@ -3007,7 +3054,8 @@
            '<span class="ltext">' + text + '</span></span>';
   }
   function skeletonTable(def) {
-    var ncol = def.cols.length + (def.drill ? 1 : 0);
+    var showEdit = def.edit && (!def.edit.flavors || def.edit.flavors.indexOf(activeFlavor) !== -1);
+    var ncol = def.cols.length + (showEdit ? 1 : 0) + (def.drill ? 1 : 0);
     var thead = tableEl.tHead, tbody = tableEl.tBodies[0];
     thead.innerHTML = "";
     var htr = thead.insertRow();
@@ -3047,6 +3095,7 @@
     }
     overviewEl.hidden = true;
     detailEl.hidden = false;
+    detailEl.classList.toggle("wide", !!def.wide);
     entityEl.hidden = true;
     listEl.hidden = false;
     countEl.innerHTML = loadrow("Loading " + def.title.toLowerCase() + "…");
@@ -3074,6 +3123,7 @@
 
   function openEntity(kind, ident, name) {
     if (!ident) return;
+    detailEl.classList.remove("wide");
     listEl.hidden = true;
     entityEl.hidden = false;
     document.getElementById("entity-title").textContent = name || "Loading…";
@@ -3533,6 +3583,8 @@
   document.getElementById("entity-back").addEventListener("click", function () {
     entityEl.hidden = true;
     listEl.hidden = false;
+    var d = curDef();
+    if (d) detailEl.classList.toggle("wide", !!d.wide);
   });
   document.getElementById("detail-refresh").addEventListener("click", function () {
     if (dState.entity) { countEl.textContent = "Loading…"; fetchDetail(dState.entity); }

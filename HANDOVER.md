@@ -462,6 +462,16 @@ counterpart to the Bulk channel & power editor.
   to one row per AP group, plus AP count. New Central: the `radios` library
   profile(s) assigned to each scope via `config-assignments`. Row → group
   detail. Values not overridden in Central show as "Regulatory default" / "—".
+- **Wide layout**: this drill-down sets `wide: true` on its `DETAIL` entry, which
+  adds `#dash-detail.wide` (a `min(96vw, 1560px)` break-out of the 1220px wrap)
+  so the many-column table fits without a horizontal scrollbar. Reset on
+  entity-drill / back.
+- **Inline edit**: each row carries a pencil (`DETAIL.edit = {mode, flavors?}`)
+  that opens the Bulk channel & power form pre-targeted at that row — AP rows
+  (Classic only) → "Specific APs" mode with the serial ticked; group rows →
+  "AP groups" mode with the group ticked. Preselection is applied in
+  `brRenderGroups` / `brRenderAps` via `brApplyPreselect` (matches on
+  `data-name` or checkbox value), since the pickers load async.
 
 ## Topology view (frontend)
 
