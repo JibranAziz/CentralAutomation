@@ -2381,18 +2381,31 @@ def _aos10_radio_merge(block: list[str], bands: dict[str, dict[str, str]]) -> tu
     (new_block, errors)."""
     errs: list[str] = []
     want: dict[int, Optional[str]] = {}
+    # current per-radio {channel, power} from the block
+    cur: dict[int, tuple[str, str]] = {}
+    for ln in block:
+        m = re.match(r"\s*radio-([012])-channel\s+(\S+)(?:\s+(\S+))?", ln)
+        if m:
+            cur[int(m.group(1))] = (m.group(2), m.group(3) or "0")
     for key, n in _AOS10_RADIO.items():
         spec = bands.get(key) or {}
         ch = str(spec.get("channel") or "").strip()
         pw = str(spec.get("power") or "").strip()
+        if ch.lower() == "auto":
+            ch = "0"
+        if pw.lower() == "auto":
+            pw = "0"
         if not ch and not pw:
             continue
         if ch == "0":
-            want[n] = None            # remove -> back to AirMatch
-        elif ch and pw:
-            want[n] = f"  radio-{n}-channel {ch} {pw}"
+            want[n] = None            # channel auto -> hand back to AirMatch
         else:
-            errs.append(f"radio {n}: AOS-10 needs both channel and power")
+            eff_ch = ch or cur.get(n, ("", ""))[0]
+            eff_pw = pw or cur.get(n, ("", "0"))[1] or "0"
+            if not eff_ch:
+                errs.append(f"radio {n}: pick a channel (there's no manual channel to keep)")
+            else:
+                want[n] = f"  radio-{n}-channel {eff_ch} {eff_pw}"
     if errs:
         return block, errs
     out = [ln for ln in block if not re.match(r"\s*radio-[012]-channel\b", ln)]
@@ -2432,16 +2445,20 @@ async def config_ap_radio(flavor: str, request: Request) -> JSONResponse:
     if not aps:
         return _err(400, "Select at least one AP.")
 
+    def _v2(v: Any) -> str:
+        v = str(v or "").strip()
+        return "0" if v.lower() == "auto" else v
+
     a, g = bands.get("a") or {}, bands.get("g") or {}
     v2fields: dict[str, str] = {}
-    if a.get("channel") not in (None, ""):
-        v2fields["achannel"] = str(a["channel"])
-    if a.get("power") not in (None, ""):
-        v2fields["atxpower"] = str(a["power"])
-    if g.get("channel") not in (None, ""):
-        v2fields["gchannel"] = str(g["channel"])
-    if g.get("power") not in (None, ""):
-        v2fields["gtxpower"] = str(g["power"])
+    if _v2(a.get("channel")):
+        v2fields["achannel"] = _v2(a["channel"])
+    if _v2(a.get("power")):
+        v2fields["atxpower"] = _v2(a["power"])
+    if _v2(g.get("channel")):
+        v2fields["gchannel"] = _v2(g["channel"])
+    if _v2(g.get("power")):
+        v2fields["gtxpower"] = _v2(g["power"])
     any_band = any((bands.get(k) or {}).get("channel") not in (None, "")
                    or (bands.get(k) or {}).get("power") not in (None, "")
                    for k in ("a", "g", "six"))

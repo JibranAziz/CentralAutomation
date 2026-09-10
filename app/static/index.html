@@ -1498,7 +1498,7 @@
             <tr><td>Change this band</td>
               <td><input type="checkbox" class="br" id="br-en-2" checked></td>
               <td><input type="checkbox" class="br" id="br-en-5" checked></td>
-              <td><input type="checkbox" class="br" id="br-en-6"></td></tr>
+              <td><input type="checkbox" class="br" id="br-en-6" checked></td></tr>
             <tr><td>Allowed channels</td>
               <td><input type="text" class="br" id="br-ch-2" data-mono placeholder="1,6,11"></td>
               <td><input type="text" class="br" id="br-ch-5" data-mono placeholder="36,40,44,…"></td>
@@ -1529,18 +1529,18 @@
             <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz <span style="font-weight:400;color:var(--muted)">· AOS-10</span></th></tr></thead>
             <tbody>
               <tr><td>Channel</td>
-                <td><input type="text" id="br-ap-ch-g" data-mono placeholder="1 / 6 / 11"></td>
-                <td><input type="text" id="br-ap-ch-a" data-mono placeholder="36 / 40 / 149"></td>
-                <td><input type="text" id="br-ap-ch-6" data-mono placeholder="1 / 5 / 33"></td></tr>
+                <td><input type="text" id="br-ap-ch-g" data-mono placeholder="6  ·  auto"></td>
+                <td><input type="text" id="br-ap-ch-a" data-mono placeholder="36  ·  auto"></td>
+                <td><input type="text" id="br-ap-ch-6" data-mono placeholder="5  ·  auto"></td></tr>
               <tr><td>TX power (dBm)</td>
-                <td><input type="number" id="br-ap-pw-g"></td>
-                <td><input type="number" id="br-ap-pw-a"></td>
-                <td><input type="number" id="br-ap-pw-6"></td></tr>
+                <td><input type="text" id="br-ap-pw-g" data-mono placeholder="18  ·  auto"></td>
+                <td><input type="text" id="br-ap-pw-a" data-mono placeholder="18  ·  auto"></td>
+                <td><input type="text" id="br-ap-pw-6" data-mono placeholder="18  ·  auto"></td></tr>
             </tbody>
           </table></div>
-          <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>0</code> = back to automatic (ARM / AirMatch).
-            <strong>AOS-8 / Instant</strong>: 2.4 &amp; 5 GHz only, power optional.
-            <strong>AOS-10</strong>: any band incl. 6 GHz, but channel <em>and</em> power are both required per radio.</div>
+          <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>auto</code> (or <code>0</code>) = hand that radio back to ARM / AirMatch.
+            <strong>AOS-8 / Instant</strong>: 2.4 &amp; 5 GHz only; power optional.
+            <strong>AOS-10</strong>: any band incl. 6 GHz; a manual channel needs a power value too (use <code>0</code> for auto power).</div>
           <div class="cgroups" style="margin-top:14px">
             <div class="lbl">Access points <span class="req">*</span></div>
             <div class="cgroup-tools"><input type="search" id="br-ap-search" placeholder="Filter by name / model / group…" autocomplete="off">
@@ -2953,7 +2953,7 @@
     brErr(""); document.getElementById("br-results").innerHTML = "";
     document.querySelector('#br-mode .chip[data-mode="aps"]').hidden = flavor !== "classic";
     brForm.querySelectorAll(".br").forEach(function (el) {
-      if (el.type === "checkbox") el.checked = el.id.indexOf("-en-6") === -1;
+      if (el.type === "checkbox") el.checked = true;
       else el.value = "";
     });
     ["br-ap-ch-g", "br-ap-ch-a", "br-ap-ch-6", "br-ap-pw-g", "br-ap-pw-a", "br-ap-pw-6"].forEach(function (id) {
@@ -3008,16 +3008,21 @@
     row.querySelector(".cr-msg").textContent = msg;
     out.appendChild(row);
   }
+  function brNorm(v) { return /^auto$/i.test(v) ? "0" : v; }
   function brApRun() {
     brErr("");
-    var g = { channel: document.getElementById("br-ap-ch-g").value.trim(), power: document.getElementById("br-ap-pw-g").value.trim() };
-    var a = { channel: document.getElementById("br-ap-ch-a").value.trim(), power: document.getElementById("br-ap-pw-a").value.trim() };
-    var six = { channel: document.getElementById("br-ap-ch-6").value.trim(), power: document.getElementById("br-ap-pw-6").value.trim() };
+    function cell(chId, pwId) {
+      return { channel: brNorm(document.getElementById(chId).value.trim()),
+               power: brNorm(document.getElementById(pwId).value.trim()) };
+    }
+    var g = cell("br-ap-ch-g", "br-ap-pw-g");
+    var a = cell("br-ap-ch-a", "br-ap-pw-a");
+    var six = cell("br-ap-ch-6", "br-ap-pw-6");
     if (!g.channel && !g.power && !a.channel && !a.power && !six.channel && !six.power) { brErr("Set at least one channel or power value."); return; }
     var aps = Array.prototype.map.call(document.querySelectorAll("#br-aps .bra:checked"),
       function (c) { return { serial: c.value, name: c.getAttribute("data-name"), arch: c.getAttribute("data-arch") || "Instant" }; });
     if (!aps.length) { brErr("Select at least one AP."); return; }
-    if (six.channel && aps.some(function (x) { return x.arch !== "AOS10"; })) { brErr("6 GHz per-AP is AOS-10 only — deselect the Instant APs or clear 6 GHz."); return; }
+    if ((six.channel && six.channel !== "0") && aps.some(function (x) { return x.arch !== "AOS10"; })) { brErr("6 GHz per-AP is AOS-10 only — deselect the Instant APs or clear 6 GHz."); return; }
     if (!window.confirm("Apply channel / power to " + aps.length + " AP(s)? A fixed value stops ARM / AirMatch managing that radio.")) return;
     var out = document.getElementById("br-results"); out.innerHTML = "";
     var ap = document.getElementById("br-apply"); ap.disabled = true; ap.textContent = "Applying…";
