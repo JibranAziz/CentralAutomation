@@ -1252,15 +1252,17 @@
 
           <!-- shared: country + timezone -->
           <div class="field-row">
-            <div class="field">
+            <div class="field" id="grp-country-field">
               <label class="lbl" for="grp-country">Country code</label>
-              <select id="grp-country"><option value="">— keep from source —</option></select>
+              <select id="grp-country"><option value="">— AP default —</option></select>
             </div>
             <div class="field">
               <label class="lbl" for="grp-tz">Timezone</label>
               <select id="grp-tz"><option value="">— keep from source —</option></select>
             </div>
           </div>
+          <div class="hint" id="grp-country-hint" hidden>On AOS-10 the regulatory domain is set per AP (hardware / provisioning),
+            not on the group — so there's no country option here.</div>
 
           <!-- AOS-8 / Instant: fresh group -->
           <div id="grp-aos8-fields" hidden>
@@ -2198,8 +2200,9 @@
     var aos10 = document.getElementById("grp-arch").value !== "Instant";
     document.getElementById("grp-aos10-fields").hidden = !aos10;
     document.getElementById("grp-aos8-fields").hidden = aos10;
-    var c = document.getElementById("grp-country");
-    c.options[0].textContent = aos10 ? "— keep from source —" : "— AP default —";
+    document.getElementById("grp-country-field").hidden = aos10;
+    document.getElementById("grp-country-hint").hidden = !aos10;
+    if (aos10) document.getElementById("grp-country").value = "";
     document.getElementById("grp-tz").options[0].textContent = aos10 ? "— keep from source —" : "— not set —";
   }
   function grpReset() {

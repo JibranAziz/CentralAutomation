@@ -2430,7 +2430,12 @@ _TIME_LINE_PREFIXES = ("clock timezone ", "clock summer-time ", "ntp-server ")
 def _group_cli_adjust(cli: list[str], *, drop_ssids: bool, drop_rf: bool,
                       drop_roles: bool, drop_time: bool,
                       country: str = "", timezone: str = "") -> list[str]:
-    """Prune copied blocks / set country & timezone on a freshly-cloned group."""
+    """Prune copied blocks / set country & timezone on a freshly-cloned group.
+
+    RF prune only removes *named* radio profiles — the bare group-default
+    `rf dot11X-radio-profile` blocks (and `arm`) are structural and must stay,
+    or the AOS-10 APs won't sync.
+    """
     out = list(cli)
     for blk in _cli_blocks(list(out)):
         h = blk[0].strip()
@@ -2440,9 +2445,10 @@ def _group_cli_adjust(cli: list[str], *, drop_ssids: bool, drop_rf: bool,
             if _unquote(h[len("wlan access-rule "):]) not in _SYS_ACL_NAMES:
                 out = _cli_drop_block(out, h)
         elif drop_rf and h.startswith("rf ") and "radio-profile" in h:
-            out = _cli_drop_block(out, h)
-        elif drop_rf and h == "arm":
-            out = _cli_drop_block(out, h)
+            # keep unnamed group defaults ("rf dot11a-radio-profile"),
+            # drop only named ones ("rf dot11a-radio-profile <name>")
+            if len(h.split()) > 2:
+                out = _cli_drop_block(out, h)
     if drop_time:
         out = [ln for ln in out if not ln.startswith(_TIME_LINE_PREFIXES)]
     if country:
@@ -2514,6 +2520,12 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     drop_rf = aos10 and not keep.get("rf", True)
     drop_roles = aos10 and not keep.get("roles", True)
     drop_time = aos10 and not keep.get("time", True)
+    # `virtual-controller-country` is an AOS-8 Instant command — an AOS-10 AP
+    # rejects it and the group stays Unsynchronized. Only apply it for Instant.
+    country_note = ""
+    if country and aos10:
+        country_note = "country code not applied (regulatory domain is per-AP on AOS-10)"
+        country = ""
     need_cli = drop_ssids or drop_rf or drop_roles or drop_time or country or timezone
 
     async with httpx.AsyncClient(timeout=60.0) as cx:
@@ -2545,6 +2557,8 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
                     note += "; " + ("; ".join(bits) if ok else f"adjust failed ({perr})")
             else:
                 note += " — review its SSIDs / rules / RF profiles"
+            if country_note:
+                note += "; " + country_note
             return JSONResponse({"ok": True, "name": name, "architecture": "AOS-10",
                                  "propertiesApplied": True, "note": note})
 

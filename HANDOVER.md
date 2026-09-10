@@ -584,8 +584,9 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
     `wlan ssid-profile` (SSIDs), `rf …radio-profile` + `arm` (RF profiles),
     non-system `wlan access-rule` (user roles; keeps
     `default_wired_port_profile` / `wired-SetMeUp`), or `clock timezone` /
-    `clock summer-time` / `ntp-server` (time). **Country code** →
-    `virtual-controller-country <CC>` line; **Timezone** →
+    `clock summer-time` / `ntp-server` (time). **Country code** (AOS-8 / Instant only) → `virtual-controller-country <CC>`
+    line — this is an Instant command, an AOS-10 AP rejects it and the group
+    stays Unsynchronized, so the AOS-10 path never sends it; **Timezone** →
     `clock timezone <name> <h> <m>`. Both offered for the AOS-8 path too (pushed
     after `POST /configuration/v2/groups`). All verified live 2026-09-10:
     cloned + pruned all four categories + set `virtual-controller-country GB` +
