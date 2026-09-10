@@ -1341,6 +1341,10 @@
             <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M2 12h2l2-7 3 11 2-7 1 3h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="s-label">Bulk channel &amp; power</span></div>
             <div class="s-sub">Change channel / TX power on the radio profiles assigned to AP groups</div>
           </button>
+          <button class="statcard" type="button" data-ncconfig="acl" style="--c:#7c3aed">
+            <div class="stat-top"><span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5 13 3.4v4c0 3.3-2.1 5.3-5 6.1-2.9-.8-5-2.8-5-6.1v-4L8 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8h5M5.5 6h5M5.5 10h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span><span class="s-label">Configure access rule</span></div>
+            <div class="s-sub">Create a policy + role and assign it to AP groups</div>
+          </button>
         </div>
         <div class="hint" style="margin-top:8px">Note: creating/deleting AP groups isn't supported when your account has both Classic and New Central — Central rejects it; use the Central UI. It works on standalone / on-prem New Central.</div>
       </div>
@@ -1464,6 +1468,13 @@
                 <td><input type="checkbox" class="ncrf" id="ncrf-11h-6"></td></tr>
             </tbody>
           </table></div>
+        </div>
+
+        <div class="ncf-grp" data-for="acl" hidden>
+          <div class="hint" style="margin-bottom:8px">Creates a New Central <strong>policy</strong> (the rules) plus a matching <strong>role</strong>, evaluated top to bottom. Source is Any; set the service and destination per rule.</div>
+          <div id="ncacl-rules"></div>
+          <button type="button" class="linkbtn" id="ncacl-add" style="margin-top:4px">+ Add rule</button>
+          <details class="gen-cli" style="margin-top:10px"><summary>Policy JSON</summary><pre id="ncacl-json"></pre></details>
         </div>
 
         <div class="cgroups" style="margin-top:14px">
@@ -2726,7 +2737,47 @@
 
   /* ---- New Central configuration ---- */
   var ncKind = null;
-  var NCF_TITLE = { ssid: "Configure SSID", radius: "Create RADIUS server", rf: "Configure RF profile", group: "Add AP group" };
+  var NCF_TITLE = { ssid: "Configure SSID", radius: "Create RADIUS server", rf: "Configure RF profile", group: "Add AP group", acl: "Configure access rule" };
+  var NCACL_SVC = [["any", "Any"], ["tcp", "TCP port"], ["udp", "UDP port"], ["icmp", "ICMP"],
+    ["svc-dns", "DNS"], ["svc-dhcp", "DHCP"], ["tcp80", "HTTP (80)"], ["tcp443", "HTTPS (443)"]];
+  var NCACL_DEST = [["any", "Any"], ["host", "Host IP"], ["network", "Network (CIDR)"], ["domain", "Domain name"]];
+  function ncaclOpt(list, v) {
+    return list.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === v ? " selected" : "") + '>' + o[1] + "</option>"; }).join("");
+  }
+  function ncaclAddRow(r) {
+    r = r || {};
+    var d = document.createElement("div");
+    d.className = "acl-row";
+    d.innerHTML =
+      '<select class="ncacl-act"><option value="permit"' + (r.action === "deny" ? "" : " selected") + '>permit</option><option value="deny"' + (r.action === "deny" ? " selected" : "") + '>deny</option></select>' +
+      '<select class="ncacl-svc">' + ncaclOpt(NCACL_SVC, r.service || "any") + '</select>' +
+      '<input type="text" class="ncacl-port" data-mono placeholder="443 or 443-445" value="' + (r.port || "") + '">' +
+      '<select class="ncacl-dest">' + ncaclOpt(NCACL_DEST, r.dest || "any") + '</select>' +
+      '<input type="text" class="ncacl-destv" data-mono placeholder="10.0.0.5 / *.example.com" value="' + (r.destValue || "").replace(/"/g, "&quot;") + '">' +
+      '<button type="button" class="linkbtn danger ncacl-del">✕</button>';
+    document.getElementById("ncacl-rules").appendChild(d);
+    function sync() {
+      var sv = d.querySelector(".ncacl-svc").value;
+      d.querySelector(".ncacl-port").hidden = !(sv === "tcp" || sv === "udp");
+      var dt = d.querySelector(".ncacl-dest").value;
+      d.querySelector(".ncacl-destv").hidden = dt === "any";
+      ncaclPreview();
+    }
+    d.querySelectorAll("select,input").forEach(function (x) { x.addEventListener("input", sync); x.addEventListener("change", sync); });
+    d.querySelector(".ncacl-del").addEventListener("click", function () { d.remove(); ncaclPreview(); });
+    sync();
+  }
+  function ncaclRows() {
+    return Array.prototype.map.call(document.querySelectorAll("#ncacl-rules .acl-row"), function (d) {
+      return { action: d.querySelector(".ncacl-act").value, service: d.querySelector(".ncacl-svc").value,
+        port: d.querySelector(".ncacl-port").value.trim(), dest: d.querySelector(".ncacl-dest").value,
+        destValue: d.querySelector(".ncacl-destv").value.trim() };
+    });
+  }
+  function ncaclPreview() {
+    var el = document.getElementById("ncacl-json");
+    if (el) el.textContent = JSON.stringify({ name: nc("name").value.trim() || "New-Role", rules: ncaclRows() }, null, 1);
+  }
   var ncSection = document.getElementById("nc-config-section");
   var ncForm = document.getElementById("nc-config-form");
   function ncErr(m, info) {
@@ -2751,6 +2802,11 @@
     ncForm.querySelectorAll(".ncf-grp").forEach(function (g) {
       g.hidden = g.getAttribute("data-for") !== kind;
     });
+    if (kind === "acl") {
+      document.getElementById("ncacl-rules").innerHTML = "";
+      ncaclAddRow({ action: "permit", service: "any", dest: "any" });
+      ncaclPreview();
+    }
     syncSsidMode();
     var scopesWrap = document.getElementById("ncf-scopes").closest(".cgroups");
     scopesWrap.hidden = kind === "group";
@@ -2800,6 +2856,8 @@
       f.msgAuth = document.getElementById("ncf-r-msgauth").checked;
     } else if (ncKind === "group") {
       f.description = document.getElementById("ncf-g-desc").value.trim();
+    } else if (ncKind === "acl") {
+      f.rules = ncaclRows();
     } else if (ncKind === "rf") {
       var MAP = { "2": "RADIO_2DOT4G", "5": "RADIO_5G", "6": "RADIO_6G" };
       f.radios = [];
@@ -2823,6 +2881,8 @@
   document.querySelectorAll("[data-ncconfig]").forEach(function (b) {
     b.addEventListener("click", function () { openNcConfig(b.getAttribute("data-ncconfig")); });
   });
+  document.getElementById("ncacl-add").addEventListener("click", function () { ncaclAddRow({}); ncaclPreview(); });
+  document.getElementById("ncf-name").addEventListener("input", function () { if (ncKind === "acl") ncaclPreview(); });
   document.getElementById("ncf-back").addEventListener("click", closeNcConfig);
   document.getElementById("ncf-create").addEventListener("click", function () {
     ncErr("");
@@ -2834,6 +2894,7 @@
     if (ncKind === "radius" && !f.address) { ncErr("RADIUS server address is required."); return; }
     if (ncKind === "radius" && !f.secret) { ncErr("Shared secret is required."); return; }
     if (ncKind === "rf" && !f.radios.length) { ncErr("Include at least one radio."); return; }
+    if (ncKind === "acl" && !f.rules.length) { ncErr("Add at least one rule."); return; }
     var scopes = Array.prototype.map.call(document.querySelectorAll("#ncf-scopes .ncsc:checked"),
       function (c) { return c.value; });
     var btn = this; btn.disabled = true; btn.textContent = "Creating…";
@@ -3513,6 +3574,9 @@
         groupsEl.appendChild(dangerRow(
           "Delete this " + (mk === "ssid" ? "SSID profile" : "RF profile"),
           function (w) { deleteNcProfile(mk, d.title, w); }));
+      } else if (activeFlavor === "new" && mk === "acl" && !/^(sys[_-]|System |apprf-|ap-acl|global-|logon-|ra-guard|allowall|control|validuser|default_)/.test(d.title)) {
+        groupsEl.appendChild(dangerRow("Delete this policy + role",
+          function (w) { deleteNcProfile("acl", d.title, w); }));
       }
 
       loadTopology(d.meta || {});

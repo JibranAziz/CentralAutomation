@@ -366,13 +366,32 @@ Library-profile CRUD (all verified live 2026-09-04):
   `API_ACCESS_RESTRICTED_IN_HYBRID_CLUSTER`, which the app catches and shows as
   "create it in the Central UI instead". Works on standalone / on-prem New
   Central. The card is shown for all New Central users; the section has a note.
+- **Configure access rule** (`kind == "acl"`) — New Central models this as a
+  two-level thing, so one create does three PUT/POSTs: `PUT
+  /network-config/v1alpha1/policies/<name>` (the rules), `PUT .../roles/<name>`
+  (a role that references the policy at position 1), then a config-assignment of
+  the **role** to each scope (`device-function: CAMPUS_AP`, `profile-type:
+  roles`). `_nc_acl_rule` maps a row → a `policy-rule`: action → `ACTION_ALLOW`
+  / `ACTION_DENY`; service → `RULE_ANY` / `RULE_TCP`+`RULE_UDP` (both need
+  `ip-header.protocol` **and** may carry `transport-fields.destination-port`
+  `{min}` or `{operator:COMPARISON_RANGE,min,max}`) / `RULE_PROTOCOL`
+  (`ip-header.protocol: IP_ICMP`) / `RULE_NET_SERVICE` (`services.net-service`,
+  a name from `/network-config/v1alpha1/net-services` — `tcp80`, `tcp443`,
+  `svc-dns`, `svc-dhcp`, …); destination → `ADDRESS_ANY` /
+  `ADDRESS_HOST{host-address.host-ipv4-address}` /
+  `ADDRESS_NETWORK{network-address.network-ipv4-address}` /
+  `ADDRESS_DOMAIN_NAME{domain-name}`; source is always `ADDRESS_ANY`.
+  `security-policy.type` must be `SECURITY_POLICY_TYPE_DEFAULT` (only accepted
+  value). Delete unassigns the role then deletes role + policy. Assignment here
+  **does** stick (unlike ssid/radios). Verified live 2026-09-10 (5 rule shapes,
+  list + detail + delete).
 - Endpoints: `GET /api/nc-config/scopes`,
-  `POST /api/nc-config/{ssid|radius|rf|group}` `{fields, scopes[]}`,
+  `POST /api/nc-config/{ssid|radius|rf|group|acl}` `{fields, scopes[]}`,
   `DELETE /api/nc-config/{kind}/{name}`. **Note the `nc-config` prefix** — a
   `/api/config/new/group` path would collide with the Classic
   `@app.post("/api/config/{flavor}/group")` route (matched first).
 - UI: separate `#nc-config-section` / `#nc-config-form` (shown when
-  `activeFlavor === "new"`), 4 cards. Delete is a `dangerRow` on the New Central
+  `activeFlavor === "new"`), 6 cards. Delete is a `dangerRow` on the New Central
   SSID / RF-profile / AP-group detail pages (`deleteNcProfile`).
 
 ### Bulk channel & power (both flavors)

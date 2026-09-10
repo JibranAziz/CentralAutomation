@@ -3608,6 +3608,57 @@ def _nc_rf_body(f: dict[str, Any]) -> dict[str, Any]:
 _NC_BODY = {"ssid": _nc_ssid_body, "radius": _nc_radius_body, "rf": _nc_rf_body}
 
 
+def _nc_acl_rule(i: int, r: dict[str, Any]) -> dict[str, Any]:
+    """One access-rule row -> a New Central policy-rule."""
+    act = "ACTION_DENY" if str(r.get("action")) == "deny" else "ACTION_ALLOW"
+    svc = str(r.get("service") or "any")
+    port = str(r.get("port") or "").strip()
+    cond: dict[str, Any] = {"source": {"type": "ADDRESS_ANY"}}
+    if svc == "any":
+        cond["rule-type"] = "RULE_ANY"
+    elif svc == "icmp":
+        cond["rule-type"] = "RULE_PROTOCOL"
+        cond["ip-header"] = {"protocol": "IP_ICMP"}
+    elif svc in ("tcp", "udp"):
+        cond["rule-type"] = "RULE_TCP" if svc == "tcp" else "RULE_UDP"
+        cond["ip-header"] = {"protocol": "IP_TCP" if svc == "tcp" else "IP_UDP"}
+        if port:
+            if "-" in port:
+                lo, hi = port.split("-", 1)
+                cond["transport-fields"] = {"destination-port": {
+                    "operator": "COMPARISON_RANGE", "min": int(lo), "max": int(hi)}}
+            else:
+                cond["transport-fields"] = {"destination-port": {"min": int(port)}}
+    else:                       # named net-service
+        cond["rule-type"] = "RULE_NET_SERVICE"
+        cond["services"] = {"net-service": svc}
+
+    d = str(r.get("dest") or "any")
+    dv = str(r.get("destValue") or "").strip()
+    if d == "host" and dv:
+        cond["destination"] = {"type": "ADDRESS_HOST", "host-address": {"host-ipv4-address": dv}}
+    elif d == "network" and dv:
+        cond["destination"] = {"type": "ADDRESS_NETWORK", "network-address": {"network-ipv4-address": dv}}
+    elif d == "domain" and dv:
+        cond["destination"] = {"type": "ADDRESS_DOMAIN_NAME", "domain-name": dv}
+    else:
+        cond["destination"] = {"type": "ADDRESS_ANY"}
+    out: dict[str, Any] = {"position": i, "condition": cond, "action": {"type": act}}
+    if r.get("desc"):
+        out["description"] = str(r["desc"])[:128]
+    return out
+
+
+def _nc_acl_bodies(f: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    name = (f.get("name") or "").strip()
+    rules = [_nc_acl_rule(i + 1, r) for i, r in enumerate(f.get("rules") or [])]
+    policy = {"name": name, "type": "POLICY_TYPE_SECURITY",
+              "security-policy": {"type": "SECURITY_POLICY_TYPE_DEFAULT", "policy-rule": rules}}
+    role = {"name": name, "description": name, "utf8": True,
+            "policies": [{"name": name, "position": 1}]}
+    return policy, role
+
+
 @app.get("/api/nc-config/scopes")
 async def nc_scopes(request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
@@ -3691,7 +3742,7 @@ async def nc_config_create(kind: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, "new")
     if err:
         return err
-    if kind not in NC_KIND_TYPE and kind != "group":
+    if kind not in NC_KIND_TYPE and kind not in ("group", "acl"):
         return _err(404, "Unknown configuration type.")
     b = await request.json()
     fields = b.get("fields") or {}
@@ -3716,11 +3767,38 @@ async def nc_config_create(kind: str, request: Request) -> JSONResponse:
             return _err(400, "Creating groups isn't supported on an account that has both "
                              "Classic and New Central — create it in the Central UI instead.")
         return _err(502, f"Central rejected the group ({r.status_code}): {txt[:300]}")
-    body = _NC_BODY[kind](fields)
-    rtype = NC_KIND_TYPE[kind]
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
     base = f"https://{conn['host']}{NC_CFG}"
+
+    if kind == "acl":
+        if not (fields.get("rules") or []):
+            return _err(400, "Add at least one rule.")
+        policy, role = _nc_acl_bodies(fields)
+        results = []
+        async with httpx.AsyncClient(timeout=45.0) as cx:
+            pr = await cx.put(f"{base}/policies/{quote(name, safe='')}", headers=hdr, json=policy)
+            pok = 200 <= pr.status_code < 300
+            results.append({"step": "create policy", "ok": pok, "status": pr.status_code,
+                            "error": "" if pok else (pr.text or "")[:400]})
+            if not pok:
+                return JSONResponse({"ok": False, "results": results})
+            rr = await cx.put(f"{base}/roles/{quote(name, safe='')}", headers=hdr, json=role)
+            rok = 200 <= rr.status_code < 300
+            results.append({"step": "create role", "ok": rok, "status": rr.status_code,
+                            "error": "" if rok else (rr.text or "")[:400]})
+            for sid in scopes:
+                ar = await cx.post(f"{base}/config-assignments", headers=hdr, json={
+                    "config-assignment": [{
+                        "scope-id": sid, "device-function": "CAMPUS_AP",
+                        "profile-type": "roles", "profile-instance": name}]})
+                aok = 200 <= ar.status_code < 300
+                results.append({"step": f"assign to {sid}", "ok": aok, "status": ar.status_code,
+                                "error": "" if aok else (ar.text or "")[:300]})
+        return JSONResponse({"ok": True, "name": name, "results": results})
+
+    body = _NC_BODY[kind](fields)
+    rtype = NC_KIND_TYPE[kind]
     results: list[dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=45.0) as cx:
         r = await cx.put(f"{base}/{rtype}/{quote(name, safe='')}", headers=hdr, json=body)
@@ -3743,10 +3821,27 @@ async def nc_config_delete(kind: str, name: str, request: Request) -> JSONRespon
     conn, err = _dash_conn(request, "new")
     if err:
         return err
-    if kind not in NC_KIND_TYPE and kind != "group":
+    if kind not in NC_KIND_TYPE and kind not in ("group", "acl"):
         return _err(404, "Unknown configuration type.")
     hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json",
            "Content-Type": "application/json"}
+    base = f"https://{conn['host']}{NC_CFG}"
+
+    if kind == "acl":
+        async with httpx.AsyncClient(timeout=45.0) as cx:
+            abody = await _nc_get(cx, conn["host"], hdr, "config-assignments",
+                                  {"profile-type": "roles"})
+            for a in (abody or {}).get("config-assignment", []):
+                if a.get("profile-instance") == name:
+                    await cx.delete(
+                        f"{base}/config-assignments/{a['scope-id']}/{a['device-function']}"
+                        f"/roles/{quote(name, safe='')}", headers=hdr)
+            r1 = await cx.delete(f"{base}/roles/{quote(name, safe='')}", headers=hdr)
+            r2 = await cx.delete(f"{base}/policies/{quote(name, safe='')}", headers=hdr)
+        if 200 <= r1.status_code < 300 or 200 <= r2.status_code < 300:
+            return JSONResponse({"ok": True, "name": name})
+        return _err(502, f"Central rejected the deletion (role {r1.status_code} / "
+                         f"policy {r2.status_code}): {(r2.text or r1.text or '')[:250]}")
 
     if kind == "group":
         async with httpx.AsyncClient(timeout=45.0) as cx:
