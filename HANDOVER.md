@@ -423,7 +423,15 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
     ARM/auto). Overlays only the fields set, POSTs the whole doc back. **No
     6 GHz.** The UI is per-band **Leave unchanged / Automatic / Manual**;
     Automatic sends channel+power `"0"`.
-  - **AOS-10** — the v2 API is silently ignored (radios are AirMatch-managed).
+  - **New Central** — a device-scoped `radios` profile: `PUT
+    /network-config/v1alpha1/radios/acs-ap-<serial>` (`arm-control.channels-for-X`
+    = the allowed list, one entry pins it; `min/max-tx-power`) then a
+    config-assignment to the AP's own **DEVICE scope** (`scope-type: DEVICE` —
+    yes, per-device assignment works, `GET .../v1alpha1/devices` gives each AP's
+    `scopeId`). AirMatch applies it on its next run (~minutes). `channels:"auto"`
+    removes the per-AP profile. `POST /api/nc-config/ap-radio`,
+    `GET /api/nc-config/aps`. Verified live 2026-09-10 (AP moved to CHAN_44).
+  - **AOS-10 (Classic)** — the v2 API is silently ignored (radios are AirMatch-managed).
     The working path is `radio-<N>-channel <ch> <pwr>` lines in the
     `per-ap-settings <mac>` block, pushed via
     `POST /configuration/v1/ap_settings_cli/{serial}` with `{"clis": [full

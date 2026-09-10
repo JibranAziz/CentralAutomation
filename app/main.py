@@ -3669,6 +3669,102 @@ async def nc_scopes(request: Request) -> JSONResponse:
                                     for g in groups]})
 
 
+@app.get("/api/nc-config/aps")
+async def nc_aps(request: Request) -> JSONResponse:
+    """AP roster for the per-AP radio picker — each AP's own DEVICE scope-id."""
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+        dev = await _nc_get(cx, conn["host"], hdr, "devices") or {}
+        mon, _t, _sc = await _fetch_all(cx, f"https://{conn['host']}/network-monitoring/v1/devices",
+                                       hdr, style="cursor", item_key="items")
+    names = {str(m.get("serial") or m.get("id")): (m.get("deviceName") or m.get("name") or "")
+             for m in mon}
+    aps = []
+    for d in dev.get("items", []):
+        if str(d.get("deviceType")) != "AP":
+            continue
+        serial = str(d.get("scopeName") or "")
+        aps.append({"serial": serial, "scopeId": str(d.get("scopeId") or ""),
+                    "name": names.get(serial) or serial, "site": d.get("siteName") or "—",
+                    "group": d.get("deviceGroupName") or "—"})
+    aps.sort(key=lambda a: (a["group"].lower(), a["name"].lower()))
+    return JSONResponse({"aps": [a for a in aps if a["serial"] and a["scopeId"]]})
+
+
+@app.post("/api/nc-config/ap-radio")
+async def nc_ap_radio(request: Request) -> JSONResponse:
+    """Per-AP channel / power on New Central: a device-scoped `radios` profile
+    (`acs-ap-<serial>`) with the requested band constraints, assigned to the
+    AP's own DEVICE scope. AirMatch applies it on its next run."""
+    conn, err = _dash_conn(request, "new")
+    if err:
+        return err
+    b = await request.json()
+    aps = [{"serial": str(x.get("serial", "")).strip(), "scopeId": str(x.get("scopeId", "")).strip()}
+           for x in (b.get("aps") or []) if str(x.get("serial", "")).strip() and str(x.get("scopeId", "")).strip()]
+    bands = b.get("bands") or {}
+    if not aps:
+        return _err(400, "Select at least one AP.")
+    if not any(v for v in bands.values()):
+        return _err(400, "Set at least one channel or power value.")
+
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    base = f"https://{conn['host']}{NC_CFG}"
+    _MAP = {"g": "RADIO_2DOT4G", "a": "RADIO_5G", "six": "RADIO_6G"}
+    _RT = {"g": "DOT11G_TYPE", "a": "DOT11A_TYPE", "six": "DOT11A_TYPE"}
+    reset = any(str((bands.get(k) or {}).get("channels", "")).strip().lower() in ("auto", "0")
+                for k in _MAP)
+    radios = []
+    for key, prof in _MAP.items():
+        spec = bands.get(key) or {}
+        ch = str(spec.get("channels") or "").strip()
+        arm: dict[str, Any] = {}
+        if ch and ch.lower() not in ("auto", "0"):
+            sfx = _NC_CHAN_SUFFIX.get(prof, "")
+            arm[_NC_BAND_CHAN_KEY[prof]] = ["CHAN_" + c.strip() + sfx
+                                           for c in ch.split(",") if c.strip()]
+        if spec.get("minPower"):
+            arm["min-tx-power"] = f'{float(spec["minPower"]):.1f}'
+        if spec.get("maxPower"):
+            arm["max-tx-power"] = f'{float(spec["maxPower"]):.1f}'
+        if arm:
+            radios.append({"profile": prof, "radio-type": _RT[key], "mode": "ACCESS",
+                           "enable": True, "arm-control": arm})
+    if not radios and not reset:
+        return _err(400, "Set at least one channel or power value (or 'auto' to reset).")
+
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=60.0) as cx:
+        for ap in aps:
+            pname = f"acs-ap-{ap['serial']}"
+            if not radios:            # reset -> unassign + delete the per-AP profile
+                await cx.delete(f"{base}/config-assignments/{ap['scopeId']}/CAMPUS_AP"
+                                f"/radios/{quote(pname, safe='')}", headers=hdr)
+                dr = await cx.delete(f"{base}/radios/{quote(pname, safe='')}", headers=hdr)
+                ok = 200 <= dr.status_code < 300 or dr.status_code == 404
+                results.append({"step": ap["serial"], "ok": ok, "status": dr.status_code,
+                                "error": "" if ok else (dr.text or "")[:200]})
+                continue
+            pr = await cx.put(f"{base}/radios/{quote(pname, safe='')}", headers=hdr,
+                              json={"name": pname, "radio": radios})
+            if not (200 <= pr.status_code < 300):
+                results.append({"step": ap["serial"], "ok": False, "status": pr.status_code,
+                                "error": (pr.text or "")[:250]})
+                continue
+            ar = await cx.post(f"{base}/config-assignments", headers=hdr, json={
+                "config-assignment": [{"scope-id": ap["scopeId"], "device-function": "CAMPUS_AP",
+                                       "profile-type": "radios", "profile-instance": pname}]})
+            aok = 200 <= ar.status_code < 300
+            results.append({"step": ap["serial"], "ok": aok, "status": ar.status_code,
+                            "error": "" if aok else (ar.text or "")[:250]})
+    return JSONResponse({"ok": any(r["ok"] for r in results), "results": results,
+                         "note": "AirMatch applies per-AP channel/power on its next run — allow a few minutes."})
+
+
 _NC_BAND_CHAN_KEY = {"RADIO_2DOT4G": "channels-for-2dot4GHz", "RADIO_5G": "channels-for-5GHz",
                      "RADIO_2ND_5G": "channels-for-5GHz", "RADIO_6G": "channels-for-6GHz"}
 _NC_CHAN_SUFFIX = {"RADIO_6G": "_6GHZ"}

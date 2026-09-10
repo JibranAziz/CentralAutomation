@@ -1565,6 +1565,34 @@
           </div>
         </div>
 
+        <div id="br-panel-aps-nc" hidden>
+          <div class="tablewrap"><table class="rfp-table">
+            <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz</th></tr></thead>
+            <tbody>
+              <tr><td>Allowed channels</td>
+                <td><input type="text" id="brnc-ch-g" data-mono placeholder="6  ·  or 1,6,11"></td>
+                <td><input type="text" id="brnc-ch-a" data-mono placeholder="36  ·  or 36,40,44"></td>
+                <td><input type="text" id="brnc-ch-6" data-mono placeholder="5  ·  or 1,5,9"></td></tr>
+              <tr><td>Min TX power (dBm)</td>
+                <td><input type="number" id="brnc-minp-g"></td>
+                <td><input type="number" id="brnc-minp-a"></td>
+                <td><input type="number" id="brnc-minp-6"></td></tr>
+              <tr><td>Max TX power (dBm)</td>
+                <td><input type="number" id="brnc-maxp-g"></td>
+                <td><input type="number" id="brnc-maxp-a"></td>
+                <td><input type="number" id="brnc-maxp-6"></td></tr>
+            </tbody>
+          </table></div>
+          <div class="hint" style="margin-top:2px">Creates a per-AP radio profile (constrained channels + power) assigned to that AP. A single channel pins it; several let AirMatch choose among them. Type <code>auto</code> in a channel field to remove the per-AP profile. <strong>AirMatch applies changes on its next run — allow a few minutes.</strong></div>
+          <div class="cgroups" style="margin-top:14px">
+            <div class="lbl">Access points <span class="req">*</span></div>
+            <div class="cgroup-tools"><input type="search" id="brnc-ap-search" placeholder="Filter by name / group…" autocomplete="off">
+              <button class="linkbtn" type="button" id="brnc-ap-all">Select all</button>
+              <button class="linkbtn" type="button" id="brnc-ap-none">Clear</button></div>
+            <div class="cgroup-list" id="brnc-aps"></div>
+          </div>
+        </div>
+
         <div class="formerr" id="br-err"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 4v3.4M7 9.4v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span id="br-err-msg"></span></div>
         <div class="actions">
           <button type="button" class="btn ghost" id="br-preview" hidden>Preview</button>
@@ -2972,14 +3000,70 @@
     document.querySelectorAll("#br-mode .chip").forEach(function (c) {
       c.setAttribute("aria-pressed", c.getAttribute("data-mode") === m ? "true" : "false");
     });
+    var ncAps = brFlavor === "new" && m === "aps";
     document.getElementById("br-panel-groups").hidden = m !== "groups";
-    document.getElementById("br-panel-aps").hidden = m !== "aps";
+    document.getElementById("br-panel-aps").hidden = ncAps || m !== "aps";
+    document.getElementById("br-panel-aps-nc").hidden = !ncAps;
     document.getElementById("br-preview").hidden = !(brFlavor === "classic" && m === "groups");
     document.getElementById("br-hint").textContent =
-      m === "aps" ? "Sets a fixed channel / power on each selected AP via the AP-settings API — nothing to do with groups."
+      ncAps ? "Pins channel / power on individual New Central APs (a per-AP radio profile assigned to that device)."
+      : m === "aps" ? "Sets a fixed channel / power on each selected AP via the AP-settings API — nothing to do with groups."
       : brFlavor === "classic" ? "Merges the channels / power you set into each group's default radio profile (leaves everything else alone)."
       : "Updates the radio profile currently assigned to each selected AP group. Groups with no assigned profile are skipped.";
-    if (m === "aps" && !brApCache.length) brLoadAps();
+    if (m === "aps" && brFlavor === "classic" && !brApCache.length) brLoadAps();
+    if (ncAps && !brNcApCache.length) brNcLoadAps();
+  }
+  var brNcApCache = [];
+  function brNcLoadAps() {
+    var box = document.getElementById("brnc-aps");
+    box.innerHTML = '<p class="cgroup-count">Loading APs…</p>';
+    api("/api/nc-config/aps").then(function (res) {
+      brNcApCache = (res.ok && res.body.aps) || [];
+      brNcRenderAps("");
+    });
+  }
+  function brNcRenderAps(filter) {
+    var box = document.getElementById("brnc-aps");
+    var f = (filter || "").toLowerCase();
+    box.innerHTML = "";
+    brNcApCache.filter(function (a) { return (a.name + " " + a.group + " " + a.site).toLowerCase().indexOf(f) !== -1; })
+      .forEach(function (a) {
+        var l = document.createElement("label");
+        var cb = document.createElement("input");
+        cb.type = "checkbox"; cb.className = "brncap"; cb.value = a.scopeId;
+        cb.setAttribute("data-serial", a.serial);
+        l.appendChild(cb);
+        l.appendChild(document.createTextNode(a.name + "  ·  " + a.group + "  ·  " + a.site));
+        box.appendChild(l);
+      });
+    if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No APs.</p>';
+  }
+  function brNcApRun() {
+    brErr("");
+    function band(ch, mn, mx) {
+      return { channels: document.getElementById(ch).value.trim().replace(/\s+/g, ""),
+               minPower: document.getElementById(mn).value.trim(), maxPower: document.getElementById(mx).value.trim() };
+    }
+    var bands = { g: band("brnc-ch-g", "brnc-minp-g", "brnc-maxp-g"),
+                  a: band("brnc-ch-a", "brnc-minp-a", "brnc-maxp-a"),
+                  six: band("brnc-ch-6", "brnc-minp-6", "brnc-maxp-6") };
+    if (!Object.keys(bands).some(function (k) { return bands[k].channels || bands[k].minPower || bands[k].maxPower; })) {
+      brErr("Set at least one channel or power value."); return;
+    }
+    var aps = Array.prototype.map.call(document.querySelectorAll("#brnc-aps .brncap:checked"),
+      function (c) { return { serial: c.getAttribute("data-serial"), scopeId: c.value }; });
+    if (!aps.length) { brErr("Select at least one AP."); return; }
+    if (!window.confirm("Apply per-AP radio settings to " + aps.length + " AP(s)? AirMatch applies on its next run.")) return;
+    var out = document.getElementById("br-results"); out.innerHTML = "";
+    var b = document.getElementById("br-apply"); b.disabled = true; b.textContent = "Applying…";
+    api("/api/nc-config/ap-radio", { method: "POST", body: JSON.stringify({ aps: aps, bands: bands }) })
+      .then(function (res) {
+        if (!res.ok && !(res.body && res.body.results)) { brErr((res.body && res.body.error) || "Request failed."); return; }
+        (res.body.results || []).forEach(function (r) { brRow(out, r.step, r.ok, r.ok ? "assigned" : ("failed (" + r.status + ") " + (r.error || "")).trim()); });
+        if (res.body && res.body.note) brRow(out, "note", true, res.body.note);
+      })
+      .catch(function () { brErr("Network error."); })
+      .finally(function () { b.disabled = false; b.textContent = "Apply"; });
   }
   function brLoadAps() {
     var box = document.getElementById("br-aps");
@@ -3016,7 +3100,7 @@
     document.getElementById("nc-config-section").hidden = true;
     overviewInner.hidden = true; detailEl.hidden = true;
     brErr(""); document.getElementById("br-results").innerHTML = "";
-    document.querySelector('#br-mode .chip[data-mode="aps"]').hidden = flavor !== "classic";
+    document.querySelector('#br-mode .chip[data-mode="aps"]').hidden = false;
     brForm.querySelectorAll(".br").forEach(function (el) {
       if (el.type === "checkbox") el.checked = true;
       else el.value = "";
@@ -3026,8 +3110,11 @@
     });
     document.querySelectorAll(".br-ap-mode").forEach(function (s) { s.value = ""; });
     brApModeSync();
-    brApCache = [];
-    brSetMode(pre && pre.mode === "aps" && flavor === "classic" ? "aps" : "groups");
+    brApCache = []; brNcApCache = [];
+    ["brnc-ch-g", "brnc-ch-a", "brnc-ch-6", "brnc-minp-g", "brnc-minp-a", "brnc-minp-6", "brnc-maxp-g", "brnc-maxp-a", "brnc-maxp-6"].forEach(function (id) {
+      var e = document.getElementById(id); if (e) e.value = "";
+    });
+    brSetMode(pre && pre.mode === "aps" ? "aps" : "groups");
     var box = document.getElementById("br-groups");
     box.innerHTML = '<p class="cgroup-count">Loading…</p>';
     var url = flavor === "classic" ? "/api/config/classic/groups" : "/api/nc-config/scopes";
@@ -3130,7 +3217,7 @@
       .finally(function () { ap.disabled = false; ap.textContent = "Apply"; });
   }
   function brRun(preview) {
-    if (brMode === "aps") { brApRun(); return; }
+    if (brMode === "aps") { (brFlavor === "new" ? brNcApRun : brApRun)(); return; }
     brErr("");
     var bands = brBands();
     if (!Object.keys(bands).length) { brErr("Set at least one channel or power value on an enabled band."); return; }
@@ -3199,6 +3286,9 @@
     var c = e.target.closest(".chip"); if (c && !c.hidden) brSetMode(c.getAttribute("data-mode"));
   });
   document.getElementById("br-ap-search").addEventListener("input", function () { brRenderAps(this.value); });
+  document.getElementById("brnc-ap-search").addEventListener("input", function () { brNcRenderAps(this.value); });
+  document.getElementById("brnc-ap-all").addEventListener("click", function () { document.querySelectorAll("#brnc-aps .brncap").forEach(function (c) { c.checked = true; }); });
+  document.getElementById("brnc-ap-none").addEventListener("click", function () { document.querySelectorAll("#brnc-aps .brncap").forEach(function (c) { c.checked = false; }); });
   document.getElementById("br-ap-all").addEventListener("click", function () {
     document.querySelectorAll("#br-aps .bra").forEach(function (c) { c.checked = true; });
   });
