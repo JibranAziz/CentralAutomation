@@ -2474,17 +2474,13 @@ async def _push_group_cli(cx: httpx.AsyncClient, base: str, hdr: dict[str, str],
 async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     """Create a config group (Classic).
 
-    AOS-8 / Instant: `POST /configuration/v2/groups` (this endpoint only ever
-    makes Instant groups — the Architecture flag is silently ignored, confirmed
-    against a live tenant).
-
-    AOS-10: `POST /configuration/v2/groups/clone` from an existing AOS-10 group
-    (`upgrade_architecture=false`). This is the only Classic-API path that
-    yields a real AOS-10 group; the new group is a **copy** of the chosen
-    source (its SSIDs / RF profiles / access rules come across — edit or clear
-    them afterwards). Cloning an AOS-8 group with `upgrade_architecture=true`
-    also makes AOS-10 but drops AccessPoints from AllowedDevTypes, so it's not
-    used here.
+    Only AOS-8 / Instant groups are supported. `POST /configuration/v2/groups`
+    is the only working create endpoint and it *always* makes an Instant group
+    (the Architecture flag is silently ignored, confirmed against a live
+    tenant). The clone-then-upgrade path *does* produce a group Central labels
+    AOS_10X, but such groups do not sync to real APs (radios stay disabled,
+    Config Status stuck Unsynchronized — hit live 2026-09-10), so AOS-10 group
+    creation is disabled: make those in the Central UI.
     """
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2497,71 +2493,26 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     dev_types = [t for t in (b.get("devTypes") or []) if t in _GROUP_DEV_TYPES] or ["AccessPoints"]
     sw_types = [t for t in (b.get("swTypes") or []) if t in _GROUP_SW_TYPES]
     ap_role = b.get("apRole") if b.get("apRole") in ("Standard", "Microbranch") else "Standard"
-    aos10 = str(b.get("arch") or "AOS10").upper() != "INSTANT"
-    clone_from = (b.get("cloneFrom") or "").strip()
-    keep = b.get("keep") or {}
+    aos10 = str(b.get("arch") or "Instant").upper() != "INSTANT"
     country = (b.get("country") or "").strip().upper()
     timezone = (b.get("timezone") or "").strip()
+    if aos10:
+        return _err(400, "AOS-10 groups can't be created through the Classic API — "
+                         "cloned groups don't sync to APs. Create it in the Central UI.")
     if country and not re.fullmatch(r"[A-Z]{2}", country):
         return _err(400, "Country must be a 2-letter code.")
     if timezone and not re.fullmatch(r"[A-Za-z0-9()_.+-]+ -?\d{1,2} -?\d{1,2}", timezone):
         return _err(400, "Bad timezone value.")
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
         return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
-    if aos10 and not clone_from:
-        return _err(400, "Pick an existing AOS-10 group to copy settings from.")
-    if not aos10 and len(password) < 6:
+    if len(password) < 6:
         return _err(400, "Group password must be at least 6 characters.")
 
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
     base = f"https://{conn['host']}"
-    drop_ssids = aos10 and not keep.get("ssids", True)
-    drop_rf = aos10 and not keep.get("rf", True)
-    drop_roles = aos10 and not keep.get("roles", True)
-    drop_time = aos10 and not keep.get("time", True)
-    # `virtual-controller-country` is an AOS-8 Instant command — an AOS-10 AP
-    # rejects it and the group stays Unsynchronized. Only apply it for Instant.
-    country_note = ""
-    if country and aos10:
-        country_note = "country code not applied (regulatory domain is per-AP on AOS-10)"
-        country = ""
-    need_cli = drop_ssids or drop_rf or drop_roles or drop_time or country or timezone
 
     async with httpx.AsyncClient(timeout=60.0) as cx:
-        if aos10:
-            r = await cx.post(f"{base}/configuration/v2/groups/clone", headers=hdr, json={
-                "group": name, "clone_group": clone_from, "upgrade_architecture": False})
-            if not (200 <= r.status_code < 300):
-                return _err(502, f"Central rejected the clone ({r.status_code}): {(r.text or '')[:300]}")
-            _ap_cli_cache_clear(conn["host"])
-            note = f"copied from {clone_from}"
-            if need_cli:
-                cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, name, use_cache=False)
-                if cur is None:
-                    note += f"; could not adjust config ({sc} {msg})"
-                else:
-                    adj = _group_cli_adjust(
-                        cur, drop_ssids=drop_ssids, drop_rf=drop_rf, drop_roles=drop_roles,
-                        drop_time=drop_time, country=country, timezone=timezone)
-                    ok, perr = await _push_group_cli(cx, base, hdr, conn["host"], name, adj)
-                    bits = []
-                    if drop_ssids or drop_rf or drop_roles or drop_time:
-                        bits.append("pruned " + ", ".join(
-                            x for x, on in (("SSIDs", drop_ssids), ("RF profiles", drop_rf),
-                                            ("user roles", drop_roles), ("time", drop_time)) if on))
-                    if country:
-                        bits.append(f"country {country}")
-                    if timezone:
-                        bits.append("timezone set")
-                    note += "; " + ("; ".join(bits) if ok else f"adjust failed ({perr})")
-            else:
-                note += " — review its SSIDs / rules / RF profiles"
-            if country_note:
-                note += "; " + country_note
-            return JSONResponse({"ok": True, "name": name, "architecture": "AOS-10",
-                                 "propertiesApplied": True, "note": note})
-
         gp: dict[str, Any] = {"AllowedDevTypes": dev_types,
                               "ApNetworkRole": "Microbranch" if ap_role == "Microbranch" else "Standard"}
         if "Switches" in dev_types and sw_types:

@@ -1229,43 +1229,32 @@
               <input type="text" id="grp-name" autocomplete="off" placeholder="Branch-01"></div>
             <div class="field">
               <label class="lbl" for="grp-arch">Architecture</label>
-              <select id="grp-arch"><option value="AOS10">ArubaOS 10</option><option value="Instant">ArubaOS 8 (Instant)</option></select>
+              <select id="grp-arch"><option value="Instant">ArubaOS 8 (Instant)</option><option value="AOS10">ArubaOS 10</option></select>
             </div>
           </div>
 
-          <!-- AOS-10: clone an existing AOS-10 group -->
-          <div id="grp-aos10-fields">
-            <div class="field">
-              <label class="lbl" for="grp-clone">Copy settings from <span class="req">*</span></label>
-              <select id="grp-clone"><option value="">— pick an AOS-10 group —</option></select>
-            </div>
-            <div class="hint">Central's API can only make an AOS-10 group by copying an existing one — the new
-              group starts as a full copy. Untick anything below to strip it from the copy.</div>
-            <div class="field">
-              <div class="lbl">Keep from the copied group</div>
-              <label class="chk"><input type="checkbox" class="grp-keep" value="ssids" checked> SSIDs</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-keep" value="rf" checked> RF profiles</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-keep" value="roles" checked> Access rules / user roles</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-keep" value="time" checked> Time (NTP + timezone)</label>
+          <!-- AOS-10: not supported via the API -->
+          <div id="grp-aos10-fields" hidden>
+            <div class="hint" style="border-left:2px solid var(--accent-line);padding-left:10px">
+              AOS-10 groups can't be created through Central's Classic API — the only API path
+              (cloning an existing AOS-10 group) produces groups that never sync to APs.
+              Create an AOS-10 group in the Central UI, then use the configuration cards here
+              to push SSIDs / RF profiles / access rules into it.
             </div>
           </div>
-
-          <!-- shared: country + timezone -->
-          <div class="field-row">
-            <div class="field" id="grp-country-field">
-              <label class="lbl" for="grp-country">Country code</label>
-              <select id="grp-country"><option value="">— AP default —</option></select>
-            </div>
-            <div class="field">
-              <label class="lbl" for="grp-tz">Timezone</label>
-              <select id="grp-tz"><option value="">— keep from source —</option></select>
-            </div>
-          </div>
-          <div class="hint" id="grp-country-hint" hidden>On AOS-10 the regulatory domain is set per AP (hardware / provisioning),
-            not on the group — so there's no country option here.</div>
 
           <!-- AOS-8 / Instant: fresh group -->
           <div id="grp-aos8-fields" hidden>
+            <div class="field-row">
+              <div class="field" id="grp-country-field">
+                <label class="lbl" for="grp-country">Country code</label>
+                <select id="grp-country"><option value="">— AP default —</option></select>
+              </div>
+              <div class="field">
+                <label class="lbl" for="grp-tz">Timezone</label>
+                <select id="grp-tz"><option value="">— not set —</option></select>
+              </div>
+            </div>
             <div class="field"><label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
               <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
                 <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
@@ -2200,35 +2189,20 @@
     var aos10 = document.getElementById("grp-arch").value !== "Instant";
     document.getElementById("grp-aos10-fields").hidden = !aos10;
     document.getElementById("grp-aos8-fields").hidden = aos10;
-    document.getElementById("grp-country-field").hidden = aos10;
-    document.getElementById("grp-country-hint").hidden = !aos10;
-    if (aos10) document.getElementById("grp-country").value = "";
-    document.getElementById("grp-tz").options[0].textContent = aos10 ? "— keep from source —" : "— not set —";
+    document.getElementById("grp-create").hidden = aos10;
   }
   function grpReset() {
     document.getElementById("grp-name").value = "";
     document.getElementById("grp-pass").value = "";
     document.querySelectorAll(".grp-dev").forEach(function (c) { c.checked = c.value === "AccessPoints"; });
     document.querySelectorAll(".grp-sw").forEach(function (c) { c.checked = true; });
-    document.querySelectorAll(".grp-keep").forEach(function (c) { c.checked = true; });
     document.getElementById("grp-sw-wrap").hidden = true;
     document.getElementById("grp-aprole").value = "Standard";
-    document.getElementById("grp-arch").value = "AOS10";
+    document.getElementById("grp-arch").value = "Instant";
     grpFillLocale();
     document.getElementById("grp-country").value = "";
     document.getElementById("grp-tz").value = "";
     grpArchSync();
-    var sel = document.getElementById("grp-clone");
-    sel.innerHTML = '<option value="">Loading AOS-10 groups…</option>';
-    api("/api/config/classic/groups").then(function (res) {
-      var a10 = (res.ok && res.body.aos10) || [];
-      sel.innerHTML = '<option value="">— pick an AOS-10 group —</option>';
-      a10.forEach(function (g) {
-        var o = document.createElement("option"); o.value = g; o.textContent = g;
-        sel.appendChild(o);
-      });
-      if (!a10.length) sel.innerHTML = '<option value="">no AOS-10 groups to copy from</option>';
-    });
   }
   document.getElementById("grp-arch").addEventListener("change", grpArchSync);
   document.getElementById("grp-dev-sw").addEventListener("change", function () {
@@ -2237,26 +2211,20 @@
   document.getElementById("grp-create").addEventListener("click", function () {
     cfgErr("");
     var name = document.getElementById("grp-name").value.trim();
-    var arch = document.getElementById("grp-arch").value;
-    var aos10 = arch !== "Instant";
     var pass = document.getElementById("grp-pass").value;
-    var cloneFrom = document.getElementById("grp-clone").value;
     var dev = Array.prototype.map.call(document.querySelectorAll(".grp-dev:checked"), function (c) { return c.value; });
     var sw = Array.prototype.map.call(document.querySelectorAll(".grp-sw:checked"), function (c) { return c.value; });
     if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(name)) { cfgErr("Group name: letters, numbers, spaces, . _ - only (max 32)."); return; }
-    if (aos10 && !cloneFrom) { cfgErr("Pick an existing AOS-10 group to copy settings from."); return; }
-    if (!aos10 && pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
-    if (!aos10 && !dev.length) { cfgErr("Pick at least one device type."); return; }
+    if (pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
+    if (!dev.length) { cfgErr("Pick at least one device type."); return; }
     var out = document.getElementById("grp-results");
     var btn = this; btn.disabled = true; btn.textContent = "Creating…";
     out.innerHTML = "";
-    var keep = {};
-    document.querySelectorAll(".grp-keep").forEach(function (c) { keep[c.value] = c.checked; });
     api("/api/config/" + activeFlavor + "/group", {
       method: "POST",
       body: JSON.stringify({ name: name, password: pass, devTypes: dev, swTypes: sw,
-        apRole: document.getElementById("grp-aprole").value, arch: arch, cloneFrom: cloneFrom,
-        keep: keep, country: document.getElementById("grp-country").value,
+        apRole: document.getElementById("grp-aprole").value, arch: "Instant",
+        country: document.getElementById("grp-country").value,
         timezone: document.getElementById("grp-tz").value })
     }).then(function (res) {
       if (!res.ok) { cfgErr((res.body && res.body.error) || "Create failed."); return; }

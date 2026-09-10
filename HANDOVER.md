@@ -565,38 +565,22 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
   entry). `_merge_cli_submerge` matches on the full header incl. name, so named
   and unnamed profiles are edited independently. A **Delete** button (shown once
   the name field is set) sends `{remove: rfpHeaders()}`.
-- **Add AP group** (`#grp-form`: name + **Architecture** select):
-  - **AOS-8 / Instant** — `POST /configuration/v2/groups`
-    `{group, group_attributes:{group_password, template_info:{Wired,Wireless}},
-    group_properties:{AllowedDevTypes, ApNetworkRole, AllowedSwitchTypes?,
-    GwNetworkRole?}}` → 201. This endpoint **only ever makes Instant groups** —
-    any `Architecture` / `AOSVersion` in the body is silently ignored (verified
-    live: all combinations return 201 with `AOSVersion: AOS_8X`).
-  - **AOS-10** — `POST /configuration/v2/groups/clone`
-    `{group, clone_group:<an existing AOS-10 group>, upgrade_architecture:false}`
-    → 201, `AOSVersion: AOS_10X` / `Architecture: AOS10`, source's
-    `AllowedDevTypes` preserved. **The new group is a full copy** of the source.
-    `GET /api/config/classic/groups` now also returns `aos10: [...]` (from
-    `/configuration/v1/groups/properties`, batched ≤15 names/call) to populate
-    the "Copy settings from" picker.
-  - **Prune / locale** (`_group_cli_adjust` → AP-CLI merge on the new group):
-    "Keep from copied group" checkboxes — unticking drops every
-    `wlan ssid-profile` (SSIDs), `rf …radio-profile` + `arm` (RF profiles),
-    non-system `wlan access-rule` (user roles; keeps
-    `default_wired_port_profile` / `wired-SetMeUp`), or `clock timezone` /
-    `clock summer-time` / `ntp-server` (time). **Country code** (AOS-8 / Instant only) → `virtual-controller-country <CC>`
-    line — this is an Instant command, an AOS-10 AP rejects it and the group
-    stays Unsynchronized, so the AOS-10 path never sends it; **Timezone** →
-    `clock timezone <name> <h> <m>`. Both offered for the AOS-8 path too (pushed
-    after `POST /configuration/v2/groups`). All verified live 2026-09-10:
-    cloned + pruned all four categories + set `virtual-controller-country GB` +
-    `clock timezone London 0 0`, read back exact, deleted.
-    Cloning an AOS-8 group with `upgrade_architecture:true` also yields AOS-10
-    but strips AccessPoints from `AllowedDevTypes` (and a later properties PATCH
-    can't re-add it), so it isn't used.
-  - delete: `DELETE /configuration/v1/groups/{name}` → 200. In the UI, delete is
-    a danger button on the AP-group detail page (`openEntity` when
-    `meta.kind === "group"`).
+- **Add AP group** (`#grp-form`) — **AOS-8 / Instant only**.
+  `POST /configuration/v2/groups` `{group, group_attributes:{group_password,
+  template_info}, group_properties:{AllowedDevTypes, ApNetworkRole,
+  AllowedSwitchTypes?, GwNetworkRole?}}` → 201. Optional **country code**
+  (`virtual-controller-country <CC>`) and **timezone**
+  (`clock timezone <name> <h> <m>`) are pushed via an AP-CLI merge after create.
+  Delete: `DELETE /configuration/v1/groups/{name}` → 200 (danger button on the
+  AP-group detail page).
+  - **AOS-10 group creation is not offered.** `POST /configuration/v2/groups`
+    only ever makes Instant groups (Architecture flag ignored). The clone path
+    (`POST /configuration/v2/groups/clone`, `upgrade_architecture:false`) makes
+    a group Central *labels* `AOS_10X`, but such groups **never sync to real
+    APs** — radios stay disabled, Config Status stuck "Unsynchronized" (hit live
+    2026-09-10 on `Test_API_3`; stripping the cloned config to a bare skeleton
+    did not help). AOS-10 groups must be made in the Central UI; the form says
+    so and hides the Create button when AOS-10 is picked.
 
 All the CLI-push cards share the group multi-select, **Preview merge** (exact
 per-group text) and a confirm-gated **Deploy**.
