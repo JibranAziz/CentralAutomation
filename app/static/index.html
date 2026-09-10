@@ -304,6 +304,9 @@
   #config-form .field { margin-bottom: 15px; }
   #config-form .field-row { display: flex; gap: 12px; }
   #config-form .field-row .field { flex: 1; }
+  #viewcfg .field-row { display: flex; gap: 12px; align-items: flex-start; }
+  #viewcfg .field-row .field { flex: 1; }
+  #viewcfg .err:not([hidden]) { display: block; }
   #config-form input[type="text"], #config-form input[type="password"],
   #config-form input[type="search"], #config-form input[type="number"], #config-form select {
     width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink);
@@ -959,6 +962,13 @@
             <div class="s-value dim" data-stat="apRadios">—</div>
             <div class="s-more">View all →</div>
           </button>
+          <button class="statcard" type="button" data-viewcfg="1" style="--c:#475569">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M3 2.5h7l3 3v8H3v-11Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M9.5 2.5v3.5H13M5.5 8.5h5M5.5 10.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+              <span class="s-label">View Configuration</span>
+            </div>
+            <div class="s-sub">Inspect and download a device or group configuration</div>
+          </button>
         </div>
         <div class="dash-actions">
           <span class="upd" id="dash-updated"></span>
@@ -1315,6 +1325,35 @@
           <button type="button" class="btn" id="config-apply">Deploy</button>
         </div>
         <div id="config-results"></div>
+      </div>
+
+      <div id="viewcfg" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="viewcfg-back">← Account Overview</button>
+          <span class="panel-head" style="margin:0">View Configuration</span>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label class="lbl" for="vc-kind">Scope</label>
+            <select id="vc-kind">
+              <option value="group">AP group</option>
+              <option value="device">Device</option>
+            </select>
+          </div>
+          <div class="field" style="flex:2">
+            <label class="lbl" for="vc-target">Target</label>
+            <select id="vc-target"><option value="">—</option></select>
+          </div>
+          <div class="field" style="align-self:flex-end">
+            <button type="button" class="btn" id="vc-load">Load</button>
+          </div>
+        </div>
+        <div id="vc-err" class="err" hidden style="margin-bottom:10px"></div>
+        <div id="vc-out-bar" hidden style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <span class="upd" id="vc-out-name"></span>
+          <button type="button" class="linkbtn" id="vc-download">Download</button>
+        </div>
+        <pre id="vc-out" hidden style="max-height:60vh;overflow:auto;background:var(--code-bg,#0d1117);color:var(--code-fg,#c9d1d9);padding:14px 16px;border-radius:8px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre;-webkit-overflow-scrolling:touch"></pre>
       </div>
 
       <!-- New Central configuration (network-config library profiles) -->
@@ -1788,6 +1827,7 @@
     });
     document.getElementById("config-section").hidden = flavor !== "classic";
     document.getElementById("nc-config-section").hidden = flavor !== "new";
+    document.querySelector('[data-viewcfg]').hidden = flavor !== "classic";
     closeConfig();
     closeNcConfig();
     closeBulkRadio();
@@ -2336,8 +2376,88 @@
   }
   function closeConfig() {
     configForm.hidden = true;
+    document.getElementById("viewcfg").hidden = true;
     overviewInner.hidden = false;
     cfgKind = null;
+  }
+
+  var vcTargets = { groups: [], devices: [] };
+  function vcErr(m) {
+    var e = document.getElementById("vc-err");
+    e.textContent = m || ""; e.hidden = !m;
+  }
+  function vcFillTargets() {
+    var kind = document.getElementById("vc-kind").value;
+    var sel = document.getElementById("vc-target");
+    sel.innerHTML = '<option value="">—</option>';
+    if (kind === "group") {
+      vcTargets.groups.forEach(function (g) {
+        var o = document.createElement("option");
+        o.value = "group|" + g; o.textContent = g;
+        sel.appendChild(o);
+      });
+    } else {
+      vcTargets.devices.forEach(function (d) {
+        var o = document.createElement("option");
+        o.value = "device|" + d.type + "|" + d.serial;
+        o.textContent = d.name + "  (" + d.type + " · " + d.serial +
+          (d.group && d.group !== "-" ? " · " + d.group : "") + ")";
+        sel.appendChild(o);
+      });
+    }
+  }
+  function openViewCfg() {
+    if (activeFlavor !== "classic") return;
+    overviewInner.hidden = true;
+    configForm.hidden = true;
+    detailEl.hidden = true;
+    document.getElementById("viewcfg").hidden = false;
+    vcErr("");
+    document.getElementById("vc-out").hidden = true;
+    document.getElementById("vc-out-bar").hidden = true;
+    var sel = document.getElementById("vc-target");
+    sel.innerHTML = '<option value="">loading…</option>';
+    api("/api/config/classic/cfg-targets").then(function (res) {
+      if (!res.ok) { vcErr((res.body && res.body.detail) || "Could not load targets."); return; }
+      vcTargets.groups = res.body.groups || [];
+      vcTargets.devices = res.body.devices || [];
+      vcFillTargets();
+    }).catch(function () { vcErr("Network error loading targets."); });
+  }
+  function vcLoad() {
+    var v = document.getElementById("vc-target").value;
+    if (!v) { vcErr("Pick a target."); return; }
+    var parts = v.split("|");
+    var kind = parts[0];
+    var dtype = kind === "device" ? parts[1] : "";
+    var ident = kind === "device" ? parts[2] : parts[1];
+    vcErr("");
+    var out = document.getElementById("vc-out");
+    out.hidden = false; out.textContent = "Loading…";
+    document.getElementById("vc-out-bar").hidden = true;
+    var q = "?kind=" + encodeURIComponent(kind) + "&ident=" + encodeURIComponent(ident) +
+            "&dtype=" + encodeURIComponent(dtype);
+    api("/api/config/classic/running" + q).then(function (res) {
+      if (!res.ok || !res.body) {
+        out.hidden = true;
+        vcErr((res.body && res.body.detail) || "Could not load configuration.");
+        return;
+      }
+      out.textContent = res.body.cli || "(empty)";
+      vcCur = { name: ident, text: res.body.cli || "" };
+      document.getElementById("vc-out-name").textContent = ident + " — " + (kind === "group" ? "group config" : dtype + " running config");
+      document.getElementById("vc-out-bar").hidden = false;
+    }).catch(function () { out.hidden = true; vcErr("Network error."); });
+  }
+  var vcCur = null;
+  function vcDownload() {
+    if (!vcCur) return;
+    var blob = new Blob([vcCur.text], { type: "text/plain" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = vcCur.name.replace(/[^\w.-]+/g, "_") + ".cfg";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   }
   function renderGroupList(filter) {
     var f = (filter || "").toLowerCase();
@@ -2360,6 +2480,16 @@
     b.addEventListener("click", function () { openConfig(b.getAttribute("data-config")); });
   });
   document.getElementById("config-back").addEventListener("click", closeConfig);
+  var vcCardBtn = document.querySelector("[data-viewcfg]");
+  if (vcCardBtn) vcCardBtn.addEventListener("click", openViewCfg);
+  document.getElementById("viewcfg-back").addEventListener("click", closeConfig);
+  document.getElementById("vc-kind").addEventListener("change", function () {
+    vcFillTargets();
+    document.getElementById("vc-out").hidden = true;
+    document.getElementById("vc-out-bar").hidden = true;
+  });
+  document.getElementById("vc-load").addEventListener("click", vcLoad);
+  document.getElementById("vc-download").addEventListener("click", vcDownload);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
   document.getElementById("cf-load-group").addEventListener("change", function () {
     loadNamesForGroup(this.value);
