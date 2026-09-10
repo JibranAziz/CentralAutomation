@@ -1233,46 +1233,42 @@
             </div>
           </div>
 
-          <!-- AOS-10: not supported via the API -->
-          <div id="grp-aos10-fields" hidden>
-            <div class="hint" style="border-left:2px solid var(--accent-line);padding-left:10px">
-              AOS-10 groups can't be created through Central's Classic API — the only API path
-              (cloning an existing AOS-10 group) produces groups that never sync to APs.
-              Create an AOS-10 group in the Central UI, then use the configuration cards here
-              to push SSIDs / RF profiles / access rules into it.
+          <div class="hint" id="grp-aos10-note" hidden>Creates a blank ArubaOS 10 group
+            (<code>POST /configuration/v3/groups</code>). Add SSIDs / RF profiles / access rules
+            with the configuration cards afterwards.</div>
+
+          <div class="field-row">
+            <div class="field" id="grp-country-field">
+              <label class="lbl" for="grp-country">Country code</label>
+              <select id="grp-country"><option value="">— AP default —</option></select>
+            </div>
+            <div class="field">
+              <label class="lbl" for="grp-tz">Timezone</label>
+              <select id="grp-tz"><option value="">— not set —</option></select>
             </div>
           </div>
 
-          <!-- AOS-8 / Instant: fresh group -->
-          <div id="grp-aos8-fields" hidden>
-            <div class="field-row">
-              <div class="field" id="grp-country-field">
-                <label class="lbl" for="grp-country">Country code</label>
-                <select id="grp-country"><option value="">— AP default —</option></select>
-              </div>
-              <div class="field">
-                <label class="lbl" for="grp-tz">Timezone</label>
-                <select id="grp-tz"><option value="">— not set —</option></select>
-              </div>
-            </div>
-            <div class="field"><label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
-              <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
-                <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
-            <div class="field">
-              <div class="lbl">Device types in this group</div>
-              <label class="chk"><input type="checkbox" class="grp-dev" value="AccessPoints" checked> Access Points</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Gateways"> Gateways</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Switches" id="grp-dev-sw"> Switches</label>
-            </div>
-            <div class="field" id="grp-sw-wrap" hidden>
-              <div class="lbl">Switch types</div>
-              <label class="chk"><input type="checkbox" class="grp-sw" value="AOS_S" checked> AOS-S</label>
-              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-sw" value="AOS_CX" checked> AOS-CX</label>
-            </div>
-            <div class="field">
-              <label class="lbl" for="grp-aprole">AP network role</label>
-              <select id="grp-aprole"><option>Standard</option><option>Microbranch</option></select>
-            </div>
+          <!-- AOS-8 / Instant only -->
+          <div class="field" id="grp-pass-field" hidden>
+            <label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
+            <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
+              <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div>
+          </div>
+
+          <div class="field">
+            <div class="lbl">Device types in this group</div>
+            <label class="chk"><input type="checkbox" class="grp-dev" value="AccessPoints" checked> Access Points</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Gateways"> Gateways</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Switches" id="grp-dev-sw"> Switches</label>
+          </div>
+          <div class="field" id="grp-sw-wrap" hidden>
+            <div class="lbl">Switch types</div>
+            <label class="chk"><input type="checkbox" class="grp-sw" value="AOS_S" checked> AOS-S</label>
+            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-sw" value="AOS_CX" checked> AOS-CX</label>
+          </div>
+          <div class="field">
+            <label class="lbl" for="grp-aprole">AP network role</label>
+            <select id="grp-aprole"><option>Standard</option><option>Microbranch</option></select>
           </div>
 
           <div class="actions" style="margin-top:14px">
@@ -2187,9 +2183,9 @@
   }
   function grpArchSync() {
     var aos10 = document.getElementById("grp-arch").value !== "Instant";
-    document.getElementById("grp-aos10-fields").hidden = !aos10;
-    document.getElementById("grp-aos8-fields").hidden = aos10;
-    document.getElementById("grp-create").hidden = aos10;
+    document.getElementById("grp-aos10-note").hidden = !aos10;
+    document.getElementById("grp-pass-field").hidden = aos10;
+    document.getElementById("grp-country-field").hidden = aos10;
   }
   function grpReset() {
     document.getElementById("grp-name").value = "";
@@ -2211,11 +2207,13 @@
   document.getElementById("grp-create").addEventListener("click", function () {
     cfgErr("");
     var name = document.getElementById("grp-name").value.trim();
+    var arch = document.getElementById("grp-arch").value;
+    var aos10 = arch !== "Instant";
     var pass = document.getElementById("grp-pass").value;
     var dev = Array.prototype.map.call(document.querySelectorAll(".grp-dev:checked"), function (c) { return c.value; });
     var sw = Array.prototype.map.call(document.querySelectorAll(".grp-sw:checked"), function (c) { return c.value; });
     if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(name)) { cfgErr("Group name: letters, numbers, spaces, . _ - only (max 32)."); return; }
-    if (pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
+    if (!aos10 && pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
     if (!dev.length) { cfgErr("Pick at least one device type."); return; }
     var out = document.getElementById("grp-results");
     var btn = this; btn.disabled = true; btn.textContent = "Creating…";
@@ -2223,7 +2221,7 @@
     api("/api/config/" + activeFlavor + "/group", {
       method: "POST",
       body: JSON.stringify({ name: name, password: pass, devTypes: dev, swTypes: sw,
-        apRole: document.getElementById("grp-aprole").value, arch: "Instant",
+        apRole: document.getElementById("grp-aprole").value, arch: arch,
         country: document.getElementById("grp-country").value,
         timezone: document.getElementById("grp-tz").value })
     }).then(function (res) {

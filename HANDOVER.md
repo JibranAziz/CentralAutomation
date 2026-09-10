@@ -565,22 +565,20 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
   entry). `_merge_cli_submerge` matches on the full header incl. name, so named
   and unnamed profiles are edited independently. A **Delete** button (shown once
   the name field is set) sends `{remove: rfpHeaders()}`.
-- **Add AP group** (`#grp-form`) — **AOS-8 / Instant only**.
-  `POST /configuration/v2/groups` `{group, group_attributes:{group_password,
-  template_info}, group_properties:{AllowedDevTypes, ApNetworkRole,
-  AllowedSwitchTypes?, GwNetworkRole?}}` → 201. Optional **country code**
-  (`virtual-controller-country <CC>`) and **timezone**
-  (`clock timezone <name> <h> <m>`) are pushed via an AP-CLI merge after create.
-  Delete: `DELETE /configuration/v1/groups/{name}` → 200 (danger button on the
-  AP-group detail page).
-  - **AOS-10 group creation is not offered.** `POST /configuration/v2/groups`
-    only ever makes Instant groups (Architecture flag ignored). The clone path
-    (`POST /configuration/v2/groups/clone`, `upgrade_architecture:false`) makes
-    a group Central *labels* `AOS_10X`, but such groups **never sync to real
-    APs** — radios stay disabled, Config Status stuck "Unsynchronized" (hit live
-    2026-09-10 on `Test_API_3`; stripping the cloned config to a bare skeleton
-    did not help). AOS-10 groups must be made in the Central UI; the form says
-    so and hides the Create button when AOS-10 is picked.
+- **Add AP group** (`#grp-form`) — name + Architecture, device types, AP role,
+  optional timezone (and country for Instant).
+  - **AOS-8 / Instant**: `POST /configuration/v2/groups` (`group_attributes.group_password`
+    + `group_properties` at top level).
+  - **AOS-10**: `POST /configuration/v3/groups` — **`group_properties` must be
+    NESTED inside `group_attributes`** (v3 schema), with `Architecture: "AOS10"`.
+    Creates a real *blank* AOS-10 group (~70-line skeleton). No password. If the
+    call 400s mentioning `cust_id`, `_classic_customer_id` looks it up and
+    retries with `?cust_id=`.  *(The earlier clone-then-strip approach is gone —
+    cloned "AOS_10X" groups never synced to APs; a v3-created blank one is a
+    proper group.)*
+  - `virtual-controller-country <CC>` (Instant only — AOS-10 APs reject it) and
+    `clock timezone <name> <h> <m>` are pushed via an AP-CLI merge after create.
+  - delete: `DELETE /configuration/v1/groups/{name}` → 200.
 
 All the CLI-push cards share the group multi-select, **Preview merge** (exact
 per-group text) and a confirm-gated **Deploy**.

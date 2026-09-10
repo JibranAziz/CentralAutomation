@@ -2470,17 +2470,30 @@ async def _push_group_cli(cx: httpx.AsyncClient, base: str, hdr: dict[str, str],
     return False, f"{r.status_code}: {(r.text or '')[:200]}"
 
 
+async def _classic_customer_id(cx: httpx.AsyncClient, base: str, hdr: dict[str, str]) -> str:
+    for path, key in (("/platform/rbac/v1/users/me", "customer_id"),
+                      ("/central/v1/user_management/current_user", "customer_id"),
+                      ("/platform/rbac/v1/users", "customer_id")):
+        try:
+            r = await cx.get(f"{base}{path}", headers=hdr)
+            if r.status_code == 200:
+                j = r.json()
+                v = j.get(key) or (j.get("users", [{}])[0].get(key) if isinstance(j.get("users"), list) else "")
+                if v:
+                    return str(v)
+        except Exception:
+            continue
+    return ""
+
+
 @app.post("/api/config/{flavor}/group")
 async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     """Create a config group (Classic).
 
-    Only AOS-8 / Instant groups are supported. `POST /configuration/v2/groups`
-    is the only working create endpoint and it *always* makes an Instant group
-    (the Architecture flag is silently ignored, confirmed against a live
-    tenant). The clone-then-upgrade path *does* produce a group Central labels
-    AOS_10X, but such groups do not sync to real APs (radios stay disabled,
-    Config Status stuck Unsynchronized — hit live 2026-09-10), so AOS-10 group
-    creation is disabled: make those in the Central UI.
+    AOS-8 / Instant: `POST /configuration/v2/groups`.
+    AOS-10: `POST /configuration/v3/groups` with `group_properties` **nested
+    inside `group_attributes`** and `Architecture: AOS10` — this creates a real,
+    blank AOS-10 group (unlike cloning, which produced groups that never synced).
     """
     conn, err = _dash_conn(request, flavor)
     if err:
@@ -2492,43 +2505,63 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     password = (b.get("password") or "").strip()
     dev_types = [t for t in (b.get("devTypes") or []) if t in _GROUP_DEV_TYPES] or ["AccessPoints"]
     sw_types = [t for t in (b.get("swTypes") or []) if t in _GROUP_SW_TYPES]
-    ap_role = b.get("apRole") if b.get("apRole") in ("Standard", "Microbranch") else "Standard"
+    ap_role = "Microbranch" if b.get("apRole") == "Microbranch" else "Standard"
     aos10 = str(b.get("arch") or "Instant").upper() != "INSTANT"
     country = (b.get("country") or "").strip().upper()
     timezone = (b.get("timezone") or "").strip()
-    if aos10:
-        return _err(400, "AOS-10 groups can't be created through the Classic API — "
-                         "cloned groups don't sync to APs. Create it in the Central UI.")
     if country and not re.fullmatch(r"[A-Z]{2}", country):
         return _err(400, "Country must be a 2-letter code.")
     if timezone and not re.fullmatch(r"[A-Za-z0-9()_.+-]+ -?\d{1,2} -?\d{1,2}", timezone):
         return _err(400, "Bad timezone value.")
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
         return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
-    if len(password) < 6:
+    if not aos10 and len(password) < 6:
         return _err(400, "Group password must be at least 6 characters.")
 
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
     base = f"https://{conn['host']}"
 
+    gp: dict[str, Any] = {
+        "AllowedDevTypes": dev_types,
+        "Architecture": "AOS10" if aos10 else "Instant",
+        "ApNetworkRole": ap_role,
+    }
+    if "Switches" in dev_types and sw_types:
+        gp["AllowedSwitchTypes"] = sw_types
+    if "Gateways" in dev_types:
+        gp["GwNetworkRole"] = "BranchGateway"
+
     async with httpx.AsyncClient(timeout=60.0) as cx:
-        gp: dict[str, Any] = {"AllowedDevTypes": dev_types,
-                              "ApNetworkRole": "Microbranch" if ap_role == "Microbranch" else "Standard"}
-        if "Switches" in dev_types and sw_types:
-            gp["AllowedSwitchTypes"] = sw_types
-        if "Gateways" in dev_types:
-            gp["GwNetworkRole"] = "BranchGateway"
-        r = await cx.post(f"{base}/configuration/v2/groups", headers=hdr, json={
-            "group": name,
-            "group_attributes": {"group_password": password,
-                                 "template_info": {"Wired": False, "Wireless": False}},
-            "group_properties": gp,
-        })
-        if not (200 <= r.status_code < 300):
-            return _err(502, f"Central rejected the group ({r.status_code}): {(r.text or '')[:300]}")
+        if aos10:
+            body = {"group": name, "group_attributes": {
+                "template_info": {"Wired": False, "Wireless": False},
+                "group_properties": gp}}
+            r = await cx.post(f"{base}/configuration/v3/groups", headers=hdr, json=body)
+            if r.status_code == 400 and "cust_id" in (r.text or ""):
+                cid = await _classic_customer_id(cx, base, hdr)
+                if cid:
+                    r = await cx.post(f"{base}/configuration/v3/groups", headers=hdr,
+                                      json=body, params={"cust_id": cid})
+            if not (200 <= r.status_code < 300):
+                return _err(502, f"Central rejected the AOS-10 group ({r.status_code}): {(r.text or '')[:300]}")
+            arch_label = "AOS-10"
+        else:
+            r = await cx.post(f"{base}/configuration/v2/groups", headers=hdr, json={
+                "group": name,
+                "group_attributes": {"group_password": password,
+                                     "template_info": {"Wired": False, "Wireless": False}},
+                "group_properties": gp,
+            })
+            if not (200 <= r.status_code < 300):
+                return _err(502, f"Central rejected the group ({r.status_code}): {(r.text or '')[:300]}")
+            arch_label = "Instant (AOS-8)"
+
         _ap_cli_cache_clear(conn["host"])
         note = ""
+        if aos10 and country:
+            note = "country not set (regulatory domain is per-AP on AOS-10)"
+            country = ""
         if country or timezone:
             cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, name, use_cache=False)
             adj = _group_cli_adjust(cur or [], drop_ssids=False, drop_rf=False,
@@ -2539,7 +2572,7 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
                                           "timezone set" if timezone else "") if x)
                     if ok else f"created; country/timezone not set ({perr})")
     return JSONResponse({
-        "ok": True, "name": name, "architecture": "Instant (AOS-8)",
+        "ok": True, "name": name, "architecture": arch_label,
         "propertiesApplied": True, "note": note,
     })
 
