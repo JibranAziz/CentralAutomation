@@ -1526,19 +1526,21 @@
 
         <div id="br-panel-aps" hidden>
           <div class="tablewrap"><table class="rfp-table">
-            <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th></tr></thead>
+            <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz <span style="font-weight:400;color:var(--muted)">· AOS-10</span></th></tr></thead>
             <tbody>
               <tr><td>Channel</td>
                 <td><input type="text" id="br-ap-ch-g" data-mono placeholder="1 / 6 / 11"></td>
-                <td><input type="text" id="br-ap-ch-a" data-mono placeholder="36 / 40 / 149"></td></tr>
+                <td><input type="text" id="br-ap-ch-a" data-mono placeholder="36 / 40 / 149"></td>
+                <td><input type="text" id="br-ap-ch-6" data-mono placeholder="1 / 5 / 33"></td></tr>
               <tr><td>TX power (dBm)</td>
                 <td><input type="number" id="br-ap-pw-g"></td>
-                <td><input type="number" id="br-ap-pw-a"></td></tr>
+                <td><input type="number" id="br-ap-pw-a"></td>
+                <td><input type="number" id="br-ap-pw-6"></td></tr>
             </tbody>
           </table></div>
-          <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>0</code> = back to automatic (ARM).
-            A fixed channel/power means ARM stops managing that radio on the AP. No 6&nbsp;GHz — the AP-settings API has no field for it.
-            <strong>AOS-8 / Instant APs only</strong> — AOS-10 radios are AirMatch-managed and this API's values are stored but never applied; set those on the AP in Central or with an RF profile.</div>
+          <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>0</code> = back to automatic (ARM / AirMatch).
+            <strong>AOS-8 / Instant</strong>: 2.4 &amp; 5 GHz only, power optional.
+            <strong>AOS-10</strong>: any band incl. 6 GHz, but channel <em>and</em> power are both required per radio.</div>
           <div class="cgroups" style="margin-top:14px">
             <div class="lbl">Access points <span class="req">*</span></div>
             <div class="cgroup-tools"><input type="search" id="br-ap-search" placeholder="Filter by name / model / group…" autocomplete="off">
@@ -2929,15 +2931,13 @@
     brApCache.filter(function (a) {
       return (a.name + " " + a.model + " " + a.group).toLowerCase().indexOf(f) !== -1;
     }).forEach(function (a) {
-      var aos10 = a.arch === "AOS10";
       var l = document.createElement("label");
-      if (aos10) l.style.opacity = ".5";
       var cb = document.createElement("input");
-      cb.type = "checkbox"; cb.className = "bra"; cb.value = a.serial; cb.setAttribute("data-name", a.name);
-      if (aos10) { cb.disabled = true; cb.title = "AOS-10 radios are AirMatch-managed — set channel/power on the AP in Central, or use an RF profile"; }
+      cb.type = "checkbox"; cb.className = "bra"; cb.value = a.serial;
+      cb.setAttribute("data-name", a.name); cb.setAttribute("data-arch", a.arch || "Instant");
       l.appendChild(cb);
       l.appendChild(document.createTextNode(a.name + "  ·  " + a.model + "  ·  " + a.group +
-        (a.status === "Down" ? "  (down)" : "") + (aos10 ? "  — AOS-10, not supported" : "")));
+        (a.status === "Down" ? "  (down)" : "") + (a.arch === "AOS10" ? "  · AOS-10" : "")));
       box.appendChild(l);
     });
     if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No APs.</p>';
@@ -2956,7 +2956,7 @@
       if (el.type === "checkbox") el.checked = el.id.indexOf("-en-6") === -1;
       else el.value = "";
     });
-    ["br-ap-ch-g", "br-ap-ch-a", "br-ap-pw-g", "br-ap-pw-a"].forEach(function (id) {
+    ["br-ap-ch-g", "br-ap-ch-a", "br-ap-ch-6", "br-ap-pw-g", "br-ap-pw-a", "br-ap-pw-6"].forEach(function (id) {
       document.getElementById(id).value = "";
     });
     brApCache = [];
@@ -3012,15 +3012,17 @@
     brErr("");
     var g = { channel: document.getElementById("br-ap-ch-g").value.trim(), power: document.getElementById("br-ap-pw-g").value.trim() };
     var a = { channel: document.getElementById("br-ap-ch-a").value.trim(), power: document.getElementById("br-ap-pw-a").value.trim() };
-    if (!g.channel && !g.power && !a.channel && !a.power) { brErr("Set at least one channel or power value."); return; }
+    var six = { channel: document.getElementById("br-ap-ch-6").value.trim(), power: document.getElementById("br-ap-pw-6").value.trim() };
+    if (!g.channel && !g.power && !a.channel && !a.power && !six.channel && !six.power) { brErr("Set at least one channel or power value."); return; }
     var aps = Array.prototype.map.call(document.querySelectorAll("#br-aps .bra:checked"),
-      function (c) { return { id: c.value, name: c.getAttribute("data-name") }; });
+      function (c) { return { serial: c.value, name: c.getAttribute("data-name"), arch: c.getAttribute("data-arch") || "Instant" }; });
     if (!aps.length) { brErr("Select at least one AP."); return; }
-    if (!window.confirm("Apply channel / power to " + aps.length + " AP(s)? A fixed value stops ARM managing that radio.")) return;
+    if (six.channel && aps.some(function (x) { return x.arch !== "AOS10"; })) { brErr("6 GHz per-AP is AOS-10 only — deselect the Instant APs or clear 6 GHz."); return; }
+    if (!window.confirm("Apply channel / power to " + aps.length + " AP(s)? A fixed value stops ARM / AirMatch managing that radio.")) return;
     var out = document.getElementById("br-results"); out.innerHTML = "";
     var ap = document.getElementById("br-apply"); ap.disabled = true; ap.textContent = "Applying…";
     api("/api/config/classic/ap-radio", { method: "POST", body: JSON.stringify({
-      aps: aps.map(function (x) { return x.id; }), bands: { a: a, g: g } }) })
+      aps: aps.map(function (x) { return { serial: x.serial, arch: x.arch }; }), bands: { a: a, g: g, six: six } }) })
       .then(function (res) {
         if (!res.ok && !(res.body && res.body.results)) { brErr((res.body && res.body.error) || "Request failed."); return; }
         (res.body.results || []).forEach(function (r) { brRow(out, r.step, r.ok, r.ok ? "updated" : ("failed (" + r.status + ") " + (r.error || "")).trim()); });

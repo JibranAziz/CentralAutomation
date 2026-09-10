@@ -156,7 +156,7 @@ curl -sk https://<host>/healthz
 | `DELETE /api/config/{flavor}/group/{name}` | delete a group |
 | `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
 | `GET /api/config/classic/apprf-apps` | apps AppRF has classified on this tenant's traffic (`/apprf/v1/applications`) — folded into the access-rule Application suggestion list; best-effort, `{apps:[]}` on failure |
-| `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2. **AOS-8/Instant only** — AOS-10 radios are AirMatch-managed, the values store but never apply (the picker disables AOS-10 APs) |
+| `POST /api/config/classic/ap-radio` | `{aps:[{serial,arch}], bands:{a|g|six:{channel,power}}}` — per-AP static channel/power. Instant → AP Settings v2 (2.4/5 GHz). AOS-10 → `radio-<N>-channel <ch> <pwr>` in the per-ap-settings block via `POST /configuration/v1/ap_settings_cli/{serial}` (N: 0=5, 1=2.4, 2=6 GHz; channel+power both required; `0`=back to AirMatch) |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
 | `GET /api/list/{flavor}/ap-radios` | Per-AP current channel / TX power / utilisation per band (2.4 / 5 / 6 GHz) — read-only |
@@ -395,17 +395,25 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
   with no assigned radio profile is reported and skipped. Verified live
   2026-09-09 (channels + power updated, restored).
 - **Per-AP (individual AP) channel/power — Classic only**, via a "Specific APs"
-  mode toggle on the same card. Uses **AP Settings v2**:
-  `GET /configuration/v2/ap_settings/{serial}` →
-  `{hostname, ip_address, zonename, achannel, atxpower, gchannel, gtxpower,
-  dot11a_radio_disable, dot11g_radio_disable, usb_port_disable}` (`"0"` = ARM /
-  auto). `config_ap_radio` reads that, overlays only the fields the user set
-  (`bands.a` = 5 GHz `achannel`/`atxpower`, `bands.g` = 2.4 GHz
-  `gchannel`/`gtxpower`), and POSTs the whole object back to the same path.
-  `GET /api/config/classic/aps` feeds the picker (name / model / group / status
-  from `/monitoring/v2/aps`). **No 6 GHz** — the v2 API has no field for it.
-  A static channel/power pins that radio (ARM stops managing it). Verified live
-  2026-09-09 (set + read back + restored to "0").
+  mode toggle on the same card. `config_ap_radio` branches on each AP's
+  architecture (`GET /api/config/classic/aps` tags `arch` from the AP's group's
+  `AOSVersion`; the picker sends `aps:[{serial,arch}]`):
+  - **AOS-8 / Instant** — **AP Settings v2**:
+    `GET`/`POST /configuration/v2/ap_settings/{serial}`
+    (`achannel`/`atxpower` = 5 GHz, `gchannel`/`gtxpower` = 2.4 GHz; `"0"` =
+    ARM/auto). Overlays only the fields set, POSTs the whole doc back. **No
+    6 GHz.**
+  - **AOS-10** — the v2 API is silently ignored (radios are AirMatch-managed).
+    The working path is `radio-<N>-channel <ch> <pwr>` lines in the
+    `per-ap-settings <mac>` block, pushed via
+    `POST /configuration/v1/ap_settings_cli/{serial}` with `{"clis": [full
+    block]}` (`_aos10_radio_merge` edits only the radio lines, keeps hostname /
+    swarm-mode / wifi modes / zonename / uplink-vlan / antenna). **N: 0 = 5,
+    1 = 2.4, 2 = 6 GHz** (same as New-Central `radioNumber`). Channel **and**
+    power both required; channel `0` removes the line → back to AirMatch. The
+    AP applies it in ~30–60 s. Verified live 2026-09-10 (set 44/6/5 then 40/11/9
+    on an AP-745, AP moved to the channels, restored).
+  - `GET /api/config/classic/aps` feeds the picker.
   - The AOS-10 group-CLI route does NOT work for per-AP: Central silently drops
     `ap-name` / `per-ap-settings` / `ap` blocks. New Central has no per-AP
     channel/power via API either (device-scoped local profiles, not exposed).

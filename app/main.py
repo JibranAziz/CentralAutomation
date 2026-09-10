@@ -2371,40 +2371,124 @@ _AP_RADIO_KEYS = ("hostname", "ip_address", "zonename", "achannel", "atxpower",
                   "dot11g_radio_disable", "usb_port_disable")
 
 
+# AOS-10 per-AP radio: `radio-<N>-channel <ch> <pwr>` in the per-ap-settings
+# block (radio 0 = 5 GHz, 1 = 2.4 GHz, 2 = 6 GHz), pushed via ap_settings_cli.
+_AOS10_RADIO = {"a": 0, "g": 1, "six": 2}
+
+
+def _aos10_radio_merge(block: list[str], bands: dict[str, dict[str, str]]) -> tuple[list[str], list[str]]:
+    """Set/clear `radio-N-channel` lines in a per-ap-settings block. Returns
+    (new_block, errors)."""
+    errs: list[str] = []
+    want: dict[int, Optional[str]] = {}
+    for key, n in _AOS10_RADIO.items():
+        spec = bands.get(key) or {}
+        ch = str(spec.get("channel") or "").strip()
+        pw = str(spec.get("power") or "").strip()
+        if not ch and not pw:
+            continue
+        if ch == "0":
+            want[n] = None            # remove -> back to AirMatch
+        elif ch and pw:
+            want[n] = f"  radio-{n}-channel {ch} {pw}"
+        else:
+            errs.append(f"radio {n}: AOS-10 needs both channel and power")
+    if errs:
+        return block, errs
+    out = [ln for ln in block if not re.match(r"\s*radio-[012]-channel\b", ln)]
+    # keep radios we're not touching
+    for ln in block:
+        m = re.match(r"\s*radio-([012])-channel\b", ln)
+        if m and int(m.group(1)) not in want:
+            out.append(ln.rstrip())
+    for n, line in sorted(want.items()):
+        if line is not None:
+            out.append(line)
+    return out, []
+
+
 @app.post("/api/config/{flavor}/ap-radio")
 async def config_ap_radio(flavor: str, request: Request) -> JSONResponse:
-    """Per-AP static channel / TX power via AP Settings v2. bands.a = 5 GHz,
-    bands.g = 2.4 GHz; each {channel, power}. Blank = leave, "0" = automatic."""
+    """Per-AP static channel / TX power.
+
+    AOS-8 / Instant: AP Settings v2 (`achannel`/`gchannel` — 2.4 & 5 GHz only).
+    AOS-10: `radio-<N>-channel` lines in the per-ap-settings block via
+    `POST /configuration/v1/ap_settings_cli/{serial}` (0 = 5, 1 = 2.4, 2 = 6 GHz;
+    channel + power both required; channel "0" = back to AirMatch).
+
+    `aps` is a list of `{serial, arch}` (arch "AOS10" or "Instant").
+    `bands` = `{a|g|six: {channel, power}}`.
+    """
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
     if flavor != "classic":
         return _err(400, "Per-AP radio settings are Classic Central only.")
     b = await request.json()
-    serials = [str(s).strip() for s in (b.get("aps") or []) if str(s).strip()]
+    aps = [{"serial": str(x.get("serial", "")).strip(),
+            "arch": "AOS10" if str(x.get("arch")) == "AOS10" else "Instant"}
+           for x in (b.get("aps") or []) if str(x.get("serial", "")).strip()]
     bands = b.get("bands") or {}
-    a, g = bands.get("a") or {}, bands.get("g") or {}
-    fields: dict[str, str] = {}
-    if a.get("channel") not in (None, ""):
-        fields["achannel"] = str(a["channel"])
-    if a.get("power") not in (None, ""):
-        fields["atxpower"] = str(a["power"])
-    if g.get("channel") not in (None, ""):
-        fields["gchannel"] = str(g["channel"])
-    if g.get("power") not in (None, ""):
-        fields["gtxpower"] = str(g["power"])
-    if not serials:
+    if not aps:
         return _err(400, "Select at least one AP.")
-    if not fields:
+
+    a, g = bands.get("a") or {}, bands.get("g") or {}
+    v2fields: dict[str, str] = {}
+    if a.get("channel") not in (None, ""):
+        v2fields["achannel"] = str(a["channel"])
+    if a.get("power") not in (None, ""):
+        v2fields["atxpower"] = str(a["power"])
+    if g.get("channel") not in (None, ""):
+        v2fields["gchannel"] = str(g["channel"])
+    if g.get("power") not in (None, ""):
+        v2fields["gtxpower"] = str(g["power"])
+    any_band = any((bands.get(k) or {}).get("channel") not in (None, "")
+                   or (bands.get(k) or {}).get("power") not in (None, "")
+                   for k in ("a", "g", "six"))
+    if not any_band:
         return _err(400, "Set at least one channel or power value.")
 
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
-    base = f"https://{conn['host']}/configuration/v2/ap_settings"
+    host = conn["host"]
+    v2base = f"https://{host}/configuration/v2/ap_settings"
+    cli_base = f"https://{host}/configuration/v1/ap_settings_cli"
     results: list[dict[str, Any]] = []
     async with httpx.AsyncClient(timeout=60.0) as cx:
-        for s in serials:
-            cur = await _retry_get(cx, f"{base}/{quote(s, safe='')}", hdr)
+        for ap in aps:
+            s = ap["serial"]
+            if ap["arch"] == "AOS10":
+                cur = await _retry_get(cx, f"{cli_base}/{quote(s, safe='')}", hdr)
+                if cur is None or cur.status_code != 200:
+                    results.append({"step": s, "ok": False,
+                                    "status": cur.status_code if cur else 0,
+                                    "error": "could not read AP settings CLI"})
+                    continue
+                block = [str(x) for x in (cur.json() if cur.content else [])]
+                if not block or not block[0].strip().startswith("per-ap-settings"):
+                    results.append({"step": s, "ok": False, "status": 0,
+                                    "error": "no per-AP settings block for this AP yet"})
+                    continue
+                new_block, errs = _aos10_radio_merge(block, bands)
+                if errs:
+                    results.append({"step": s, "ok": False, "status": 400, "error": "; ".join(errs)})
+                    continue
+                try:
+                    r = await cx.post(f"{cli_base}/{quote(s, safe='')}", headers=hdr,
+                                      json={"clis": new_block})
+                    ok = 200 <= r.status_code < 300
+                    results.append({"step": s, "ok": ok, "status": r.status_code,
+                                    "error": "" if ok else (r.text or "")[:250]})
+                except Exception as exc:
+                    results.append({"step": s, "ok": False, "status": 0, "error": str(exc)[:200]})
+                continue
+
+            # AOS-8 / Instant
+            if not v2fields:
+                results.append({"step": s, "ok": False, "status": 400,
+                                "error": "Instant APs: set a 2.4 or 5 GHz channel/power"})
+                continue
+            cur = await _retry_get(cx, f"{v2base}/{quote(s, safe='')}", hdr)
             if cur is None or cur.status_code != 200:
                 results.append({"step": s, "ok": False,
                                 "status": cur.status_code if cur else 0,
@@ -2414,9 +2498,9 @@ async def config_ap_radio(flavor: str, request: Request) -> JSONResponse:
             body = {k: doc.get(k) for k in _AP_RADIO_KEYS if k in doc}
             body.setdefault("hostname", doc.get("hostname") or "")
             body.setdefault("ip_address", doc.get("ip_address") or "0.0.0.0")
-            body.update(fields)
+            body.update(v2fields)
             try:
-                r = await cx.post(f"{base}/{quote(s, safe='')}", headers=hdr, json=body)
+                r = await cx.post(f"{v2base}/{quote(s, safe='')}", headers=hdr, json=body)
                 ok = 200 <= r.status_code < 300
                 results.append({"step": doc.get("hostname") or s, "ok": ok,
                                 "status": r.status_code,
