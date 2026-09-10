@@ -453,10 +453,12 @@ block; pushed via
 `POST /api/config/classic/cli` with **block-replace** (`_merge_cli`, no
 submerge — an ACL is an ordered list you define whole). "Load from" pulls a
 rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
-**Verified end-to-end 2026-09-09**: preview → deploy → read-back (byte-exact,
-`log`/`alias`/`deny` all preserved) → shows in the list + detail parse →
-delete → gone. Central accepts `wlan access-rule` cleanly. Plus view live
-(53 Classic rules / 66 New policies).
+**Verified end-to-end 2026-09-09 / -10**: preview → deploy → read-back
+(byte-exact) → list row + detail parse → delete → gone, through the app, for a
+7-rule mixed rule (`app` / `appcategory` / `webcategory` / `webreputation` /
+IP-proto# / host-tcp+`log` / permit-all) — all preserved, list shows "Filtered"
+7 rules, detail parses every ACE. Central accepts `wlan access-rule` cleanly.
+Plus view live (53 Classic rules / 66 New policies).
 
 ### Radio and TX Power (AP radios, both flavors)
 
