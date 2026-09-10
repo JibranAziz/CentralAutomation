@@ -2423,6 +2423,47 @@ _GROUP_DEV_TYPES = {"AccessPoints", "Gateways", "Switches"}
 _GROUP_SW_TYPES = {"AOS_S", "AOS_CX"}
 
 
+_SYS_ACL_NAMES = {"default_wired_port_profile", "wired-SetMeUp"}
+_TIME_LINE_PREFIXES = ("clock timezone ", "clock summer-time ", "ntp-server ")
+
+
+def _group_cli_adjust(cli: list[str], *, drop_ssids: bool, drop_rf: bool,
+                      drop_roles: bool, drop_time: bool,
+                      country: str = "", timezone: str = "") -> list[str]:
+    """Prune copied blocks / set country & timezone on a freshly-cloned group."""
+    out = list(cli)
+    for blk in _cli_blocks(list(out)):
+        h = blk[0].strip()
+        if drop_ssids and h.startswith("wlan ssid-profile "):
+            out = _cli_drop_block(out, h)
+        elif drop_roles and h.startswith("wlan access-rule "):
+            if _unquote(h[len("wlan access-rule "):]) not in _SYS_ACL_NAMES:
+                out = _cli_drop_block(out, h)
+        elif drop_rf and h.startswith("rf ") and "radio-profile" in h:
+            out = _cli_drop_block(out, h)
+        elif drop_rf and h == "arm":
+            out = _cli_drop_block(out, h)
+    if drop_time:
+        out = [ln for ln in out if not ln.startswith(_TIME_LINE_PREFIXES)]
+    if country:
+        out = [ln for ln in out if not ln.startswith("virtual-controller-country")]
+        out.append(f"virtual-controller-country {country}")
+    if timezone:
+        out = [ln for ln in out if not ln.startswith("clock timezone ")]
+        out.append(f"clock timezone {timezone}")
+    return out
+
+
+async def _push_group_cli(cx: httpx.AsyncClient, base: str, hdr: dict[str, str],
+                          host: str, group: str, cli: list[str]) -> tuple[bool, str]:
+    r = await cx.post(f"{base}/configuration/v1/ap_cli/{quote(group, safe='')}",
+                      headers=hdr, json={"clis": cli})
+    if 200 <= r.status_code < 300:
+        _ap_cli_cache_clear(host, group)
+        return True, ""
+    return False, f"{r.status_code}: {(r.text or '')[:200]}"
+
+
 @app.post("/api/config/{flavor}/group")
 async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     """Create a config group (Classic).
@@ -2452,6 +2493,13 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     ap_role = b.get("apRole") if b.get("apRole") in ("Standard", "Microbranch") else "Standard"
     aos10 = str(b.get("arch") or "AOS10").upper() != "INSTANT"
     clone_from = (b.get("cloneFrom") or "").strip()
+    keep = b.get("keep") or {}
+    country = (b.get("country") or "").strip().upper()
+    timezone = (b.get("timezone") or "").strip()
+    if country and not re.fullmatch(r"[A-Z]{2}", country):
+        return _err(400, "Country must be a 2-letter code.")
+    if timezone and not re.fullmatch(r"[A-Za-z0-9()_.+-]+ -?\d{1,2} -?\d{1,2}", timezone):
+        return _err(400, "Bad timezone value.")
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
         return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
     if aos10 and not clone_from:
@@ -2462,18 +2510,43 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
     base = f"https://{conn['host']}"
-    async with httpx.AsyncClient(timeout=45.0) as cx:
+    drop_ssids = aos10 and not keep.get("ssids", True)
+    drop_rf = aos10 and not keep.get("rf", True)
+    drop_roles = aos10 and not keep.get("roles", True)
+    drop_time = aos10 and not keep.get("time", True)
+    need_cli = drop_ssids or drop_rf or drop_roles or drop_time or country or timezone
+
+    async with httpx.AsyncClient(timeout=60.0) as cx:
         if aos10:
             r = await cx.post(f"{base}/configuration/v2/groups/clone", headers=hdr, json={
                 "group": name, "clone_group": clone_from, "upgrade_architecture": False})
             if not (200 <= r.status_code < 300):
                 return _err(502, f"Central rejected the clone ({r.status_code}): {(r.text or '')[:300]}")
             _ap_cli_cache_clear(conn["host"])
-            return JSONResponse({
-                "ok": True, "name": name, "architecture": "AOS-10",
-                "propertiesApplied": True,
-                "note": f"copied from {clone_from} — review its SSIDs / rules / RF profiles",
-            })
+            note = f"copied from {clone_from}"
+            if need_cli:
+                cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, name, use_cache=False)
+                if cur is None:
+                    note += f"; could not adjust config ({sc} {msg})"
+                else:
+                    adj = _group_cli_adjust(
+                        cur, drop_ssids=drop_ssids, drop_rf=drop_rf, drop_roles=drop_roles,
+                        drop_time=drop_time, country=country, timezone=timezone)
+                    ok, perr = await _push_group_cli(cx, base, hdr, conn["host"], name, adj)
+                    bits = []
+                    if drop_ssids or drop_rf or drop_roles or drop_time:
+                        bits.append("pruned " + ", ".join(
+                            x for x, on in (("SSIDs", drop_ssids), ("RF profiles", drop_rf),
+                                            ("user roles", drop_roles), ("time", drop_time)) if on))
+                    if country:
+                        bits.append(f"country {country}")
+                    if timezone:
+                        bits.append("timezone set")
+                    note += "; " + ("; ".join(bits) if ok else f"adjust failed ({perr})")
+            else:
+                note += " — review its SSIDs / rules / RF profiles"
+            return JSONResponse({"ok": True, "name": name, "architecture": "AOS-10",
+                                 "propertiesApplied": True, "note": note})
 
         gp: dict[str, Any] = {"AllowedDevTypes": dev_types,
                               "ApNetworkRole": "Microbranch" if ap_role == "Microbranch" else "Standard"}
@@ -2489,10 +2562,20 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
         })
         if not (200 <= r.status_code < 300):
             return _err(502, f"Central rejected the group ({r.status_code}): {(r.text or '')[:300]}")
-    _ap_cli_cache_clear(conn["host"])
+        _ap_cli_cache_clear(conn["host"])
+        note = ""
+        if country or timezone:
+            cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, name, use_cache=False)
+            adj = _group_cli_adjust(cur or [], drop_ssids=False, drop_rf=False,
+                                    drop_roles=False, drop_time=False,
+                                    country=country, timezone=timezone)
+            ok, perr = await _push_group_cli(cx, base, hdr, conn["host"], name, adj)
+            note = (", ".join(x for x in (f"country {country}" if country else "",
+                                          "timezone set" if timezone else "") if x)
+                    if ok else f"created; country/timezone not set ({perr})")
     return JSONResponse({
         "ok": True, "name": name, "architecture": "Instant (AOS-8)",
-        "propertiesApplied": True, "note": "",
+        "propertiesApplied": True, "note": note,
     })
 
 

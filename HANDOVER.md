@@ -575,10 +575,21 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
   - **AOS-10** — `POST /configuration/v2/groups/clone`
     `{group, clone_group:<an existing AOS-10 group>, upgrade_architecture:false}`
     → 201, `AOSVersion: AOS_10X` / `Architecture: AOS10`, source's
-    `AllowedDevTypes` preserved. **The new group is a full copy** of the source
-    (SSIDs / RF profiles / access rules included). `GET /api/config/classic/groups`
-    now also returns `aos10: [...]` (from `/configuration/v1/groups/properties`,
-    batched ≤15 names/call) to populate the "Copy settings from" picker.
+    `AllowedDevTypes` preserved. **The new group is a full copy** of the source.
+    `GET /api/config/classic/groups` now also returns `aos10: [...]` (from
+    `/configuration/v1/groups/properties`, batched ≤15 names/call) to populate
+    the "Copy settings from" picker.
+  - **Prune / locale** (`_group_cli_adjust` → AP-CLI merge on the new group):
+    "Keep from copied group" checkboxes — unticking drops every
+    `wlan ssid-profile` (SSIDs), `rf …radio-profile` + `arm` (RF profiles),
+    non-system `wlan access-rule` (user roles; keeps
+    `default_wired_port_profile` / `wired-SetMeUp`), or `clock timezone` /
+    `clock summer-time` / `ntp-server` (time). **Country code** →
+    `virtual-controller-country <CC>` line; **Timezone** →
+    `clock timezone <name> <h> <m>`. Both offered for the AOS-8 path too (pushed
+    after `POST /configuration/v2/groups`). All verified live 2026-09-10:
+    cloned + pruned all four categories + set `virtual-controller-country GB` +
+    `clock timezone London 0 0`, read back exact, deleted.
     Cloning an AOS-8 group with `upgrade_architecture:true` also yields AOS-10
     but strips AccessPoints from `AllowedDevTypes` (and a later properties PATCH
     can't re-add it), so it isn't used.
