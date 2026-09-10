@@ -2469,7 +2469,7 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     dev_types = [t for t in (b.get("devTypes") or []) if t in _GROUP_DEV_TYPES] or ["AccessPoints"]
     sw_types = [t for t in (b.get("swTypes") or []) if t in _GROUP_SW_TYPES]
     ap_role = "Microbranch" if b.get("apRole") == "Microbranch" else "Standard"
-    aos10 = str(b.get("arch") or "Instant").upper() != "INSTANT"
+    aos10 = str(b.get("arch") or "AOS10").upper() != "INSTANT"
     country = (b.get("country") or "").strip().upper()
     timezone = (b.get("timezone") or "").strip()
     if country and not re.fullmatch(r"[A-Z]{2}", country):
