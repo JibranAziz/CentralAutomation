@@ -2320,14 +2320,21 @@ async def config_aps(flavor: str, request: Request) -> JSONResponse:
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
         raw, _t, _sc = await _fetch_all(cx, f"https://{conn['host']}/monitoring/v2/aps", hdr,
                                        style="offset", params={"limit": "1000"}, item_key="aps")
-    aps = [{
-        "serial": _pick(a, "serial", "serial_number", default=""),
-        "name": _pick(a, "name", "hostname", default="?"),
-        "model": _pick(a, "model", "part_number", default="-"),
-        "group": _pick(a, "group_name", "group", default="-"),
-        "status": "Up" if _classic_up(_pick(a, "status", "state", default="")) else "Down",
-    } for a in raw]
-    aps = [a for a in aps if a["serial"]]
+        aps = [{
+            "serial": _pick(a, "serial", "serial_number", default=""),
+            "name": _pick(a, "name", "hostname", default="?"),
+            "model": _pick(a, "model", "part_number", default="-"),
+            "group": _pick(a, "group_name", "group", default="-"),
+            "status": "Up" if _classic_up(_pick(a, "status", "state", default="")) else "Down",
+        } for a in raw]
+        aps = [a for a in aps if a["serial"]]
+        # tag each AP's architecture — per-AP static channel/power via ap_settings
+        # only takes effect on AOS-8/Instant (AOS-10 radios are AirMatch-managed
+        # and the settings are stored but never applied).
+        groups = sorted({a["group"] for a in aps if a["group"] and a["group"] != "-"})
+        props = await _classic_group_props(cx, conn["host"], hdr, groups)
+        for a in aps:
+            a["arch"] = "AOS10" if props.get(a["group"], {}).get("AOSVersion") == "AOS_10X" else "Instant"
     aps.sort(key=lambda a: a["name"].lower())
     return JSONResponse({"aps": aps})
 

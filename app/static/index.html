@@ -1537,7 +1537,8 @@
             </tbody>
           </table></div>
           <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>0</code> = back to automatic (ARM).
-            A fixed channel/power means ARM stops managing that radio on the AP. No 6&nbsp;GHz — the AP-settings API has no field for it.</div>
+            A fixed channel/power means ARM stops managing that radio on the AP. No 6&nbsp;GHz — the AP-settings API has no field for it.
+            <strong>AOS-8 / Instant APs only</strong> — AOS-10 radios are AirMatch-managed and this API's values are stored but never applied; set those on the AP in Central or with an RF profile.</div>
           <div class="cgroups" style="margin-top:14px">
             <div class="lbl">Access points <span class="req">*</span></div>
             <div class="cgroup-tools"><input type="search" id="br-ap-search" placeholder="Filter by name / model / group…" autocomplete="off">
@@ -2928,12 +2929,15 @@
     brApCache.filter(function (a) {
       return (a.name + " " + a.model + " " + a.group).toLowerCase().indexOf(f) !== -1;
     }).forEach(function (a) {
+      var aos10 = a.arch === "AOS10";
       var l = document.createElement("label");
+      if (aos10) l.style.opacity = ".5";
       var cb = document.createElement("input");
       cb.type = "checkbox"; cb.className = "bra"; cb.value = a.serial; cb.setAttribute("data-name", a.name);
+      if (aos10) { cb.disabled = true; cb.title = "AOS-10 radios are AirMatch-managed — set channel/power on the AP in Central, or use an RF profile"; }
       l.appendChild(cb);
       l.appendChild(document.createTextNode(a.name + "  ·  " + a.model + "  ·  " + a.group +
-        (a.status === "Down" ? "  (down)" : "")));
+        (a.status === "Down" ? "  (down)" : "") + (aos10 ? "  — AOS-10, not supported" : "")));
       box.appendChild(l);
     });
     if (!box.children.length) box.innerHTML = '<p class="cgroup-count">No APs.</p>';

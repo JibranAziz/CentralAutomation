@@ -156,7 +156,7 @@ curl -sk https://<host>/healthz
 | `DELETE /api/config/{flavor}/group/{name}` | delete a group |
 | `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
 | `GET /api/config/classic/apprf-apps` | apps AppRF has classified on this tenant's traffic (`/apprf/v1/applications`) — folded into the access-rule Application suggestion list; best-effort, `{apps:[]}` on failure |
-| `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2 |
+| `POST /api/config/classic/ap-radio` | `{aps[], bands:{a,g:{channel,power}}}` — per-AP static channel/power via AP Settings v2. **AOS-8/Instant only** — AOS-10 radios are AirMatch-managed, the values store but never apply (the picker disables AOS-10 APs) |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
 | `GET /api/list/{flavor}/ap-radios` | Per-AP current channel / TX power / utilisation per band (2.4 / 5 / 6 GHz) — read-only |
