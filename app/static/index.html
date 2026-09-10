@@ -2075,7 +2075,7 @@
     if (isRadius) { rformDefaults(); rformToCli(); }
     else if (isRf) { rfpDefaults(); rfpToCli(); }
     else if (isGroup) { grpReset(); }
-    else if (isAcl) { aclReset(); }
+    else if (isAcl) { aclReset(); aclLoadApprfApps(); }
     else if (isAcl) { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     else { document.getElementById("cf-name-label").firstChild.textContent = m.nameLabel + " "; }
     nameEl.value = "";
@@ -2408,6 +2408,26 @@
 
   /* ---- Access rule / user role editor ---- */
   var aclLoadedName = "";
+  var aclApprfLoaded = false;
+  function aclLoadApprfApps() {
+    if (aclApprfLoaded || activeFlavor !== "classic") return;
+    aclApprfLoaded = true;
+    api("/api/config/classic/apprf-apps").then(function (res) {
+      var apps = (res.ok && res.body.apps) || [];
+      if (!apps.length) return;
+      var dl = document.getElementById("dl-acl-app");
+      var have = {};
+      dl.querySelectorAll("option").forEach(function (o) { have[o.value.toLowerCase()] = 1; });
+      var frag = document.createDocumentFragment();
+      apps.forEach(function (a) {
+        if (have[a.toLowerCase()]) return;
+        var o = document.createElement("option");
+        o.value = a; o.label = a + "  · seen on network";
+        frag.appendChild(o);
+      });
+      dl.appendChild(frag);
+    }).catch(function () { aclApprfLoaded = false; });
+  }
   var ACL_DEST = [["any", "Any"], ["host", "Host IP"], ["alias", "Hostname / alias"], ["net", "Network"]];
   var ACL_SVC = [["any", "Any"], ["tcp", "TCP"], ["udp", "UDP"], ["icmp", "ICMP"], ["proto", "IP proto"],
     ["app", "Application"], ["appcat", "App category"], ["webcat", "Web category"], ["webrep", "Web reputation"]];

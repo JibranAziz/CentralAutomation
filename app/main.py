@@ -2310,6 +2310,33 @@ async def config_aps(flavor: str, request: Request) -> JSONResponse:
     return JSONResponse({"aps": aps})
 
 
+@app.get("/api/config/{flavor}/apprf-apps")
+async def config_apprf_apps(flavor: str, request: Request) -> JSONResponse:
+    """Applications AppRF has actually classified on this tenant's traffic —
+    folded into the access-rule 'Application' suggestion list. Best-effort:
+    returns {"apps": [...]} (possibly empty) rather than erroring."""
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return JSONResponse({"apps": []})
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    names: set[str] = set()
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+            r = await cx.get(f"https://{conn['host']}/apprf/v1/applications",
+                             headers=hdr, params={"count": "2000"})
+        if r.status_code == 200:
+            res = (r.json() or {}).get("result", {})
+            for row in res.get("app_id", []) or []:
+                nm = str(row.get("name") or "").strip()
+                if nm and nm.lower() not in ("unclassified", "unknown", "other"):
+                    names.add(nm)
+    except Exception:
+        pass
+    return JSONResponse({"apps": sorted(names, key=str.lower)})
+
+
 _AP_RADIO_KEYS = ("hostname", "ip_address", "zonename", "achannel", "atxpower",
                   "gchannel", "gtxpower", "dot11a_radio_disable",
                   "dot11g_radio_disable", "usb_port_disable")
