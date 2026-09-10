@@ -402,17 +402,17 @@ unchanged, untick a band to skip it. Target = AP-group multi-select.
     `GET`/`POST /configuration/v2/ap_settings/{serial}`
     (`achannel`/`atxpower` = 5 GHz, `gchannel`/`gtxpower` = 2.4 GHz; `"0"` =
     ARM/auto). Overlays only the fields set, POSTs the whole doc back. **No
-    6 GHz.**
+    6 GHz.** The UI is per-band **Leave unchanged / Automatic / Manual**;
+    Automatic sends channel+power `"0"`.
   - **AOS-10** — the v2 API is silently ignored (radios are AirMatch-managed).
     The working path is `radio-<N>-channel <ch> <pwr>` lines in the
     `per-ap-settings <mac>` block, pushed via
     `POST /configuration/v1/ap_settings_cli/{serial}` with `{"clis": [full
     block]}` (`_aos10_radio_merge` edits only the radio lines, keeps hostname /
     swarm-mode / wifi modes / zonename / uplink-vlan / antenna). **N: 0 = 5,
-    1 = 2.4, 2 = 6 GHz** (same as New-Central `radioNumber`). Channel **and**
-    power both required; channel `0` removes the line → back to AirMatch. The
-    AP applies it in ~30–60 s. Verified live 2026-09-10 (set 44/6/5 then 40/11/9
-    on an AP-745, AP moved to the channels, restored).
+    1 = 2.4, 2 = 6 GHz** (same as New-Central `radioNumber`). `radio-N-channel
+    <ch> <pwr>` — power `0` = auto power; drop the whole line = channel back to
+    AirMatch. AP applies in ~30–60 s. Verified live 2026-09-10.
   - `GET /api/config/classic/aps` feeds the picker.
   - The AOS-10 group-CLI route does NOT work for per-AP: Central silently drops
     `ap-name` / `per-ap-settings` / `ap` blocks. New Central has no per-AP

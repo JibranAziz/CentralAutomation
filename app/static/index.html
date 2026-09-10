@@ -1526,21 +1526,25 @@
 
         <div id="br-panel-aps" hidden>
           <div class="tablewrap"><table class="rfp-table">
-            <thead><tr><th>Setting</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz <span style="font-weight:400;color:var(--muted)">· AOS-10</span></th></tr></thead>
+            <thead><tr><th>Radio</th><th>2.4 GHz</th><th>5 GHz</th><th>6 GHz <span style="font-weight:400;color:var(--muted)">· AOS-10</span></th></tr></thead>
             <tbody>
-              <tr><td>Channel</td>
-                <td><input type="text" id="br-ap-ch-g" data-mono placeholder="6  ·  auto"></td>
-                <td><input type="text" id="br-ap-ch-a" data-mono placeholder="36  ·  auto"></td>
-                <td><input type="text" id="br-ap-ch-6" data-mono placeholder="5  ·  auto"></td></tr>
-              <tr><td>TX power (dBm)</td>
-                <td><input type="text" id="br-ap-pw-g" data-mono placeholder="18  ·  auto"></td>
-                <td><input type="text" id="br-ap-pw-a" data-mono placeholder="18  ·  auto"></td>
-                <td><input type="text" id="br-ap-pw-6" data-mono placeholder="18  ·  auto"></td></tr>
+              <tr><td>Assignment</td>
+                <td><select class="br-ap-mode" data-band="g"><option value="">Leave unchanged</option><option value="auto">Automatic</option><option value="manual">Manual</option></select></td>
+                <td><select class="br-ap-mode" data-band="a"><option value="">Leave unchanged</option><option value="auto">Automatic</option><option value="manual">Manual</option></select></td>
+                <td><select class="br-ap-mode" data-band="6"><option value="">Leave unchanged</option><option value="auto">Automatic</option><option value="manual">Manual</option></select></td></tr>
+              <tr class="br-ap-manual" hidden><td>Channel</td>
+                <td><input type="text" id="br-ap-ch-g" data-mono data-band="g" placeholder="1 / 6 / 11"></td>
+                <td><input type="text" id="br-ap-ch-a" data-mono data-band="a" placeholder="36 / 40 / 149"></td>
+                <td><input type="text" id="br-ap-ch-6" data-mono data-band="6" placeholder="1 / 5 / 33"></td></tr>
+              <tr class="br-ap-manual" hidden><td>TX power (dBm)</td>
+                <td><input type="text" id="br-ap-pw-g" data-mono data-band="g" placeholder="dBm / blank = auto"></td>
+                <td><input type="text" id="br-ap-pw-a" data-mono data-band="a" placeholder="dBm / blank = auto"></td>
+                <td><input type="text" id="br-ap-pw-6" data-mono data-band="6" placeholder="dBm / blank = auto"></td></tr>
             </tbody>
           </table></div>
-          <div class="hint" style="margin-top:2px">Blank = leave unchanged. <code>auto</code> (or <code>0</code>) = hand that radio back to ARM / AirMatch.
-            <strong>AOS-8 / Instant</strong>: 2.4 &amp; 5 GHz only; power optional.
-            <strong>AOS-10</strong>: any band incl. 6 GHz; a manual channel needs a power value too (use <code>0</code> for auto power).</div>
+          <div class="hint" style="margin-top:2px"><strong>Automatic</strong> hands that radio back to ARM / AirMatch.
+            <strong>Manual</strong> pins it — enter a channel (AOS-10 also takes a TX power; leave power blank for auto power).
+            AOS-8 / Instant APs have 2.4 &amp; 5 GHz only.</div>
           <div class="cgroups" style="margin-top:14px">
             <div class="lbl">Access points <span class="req">*</span></div>
             <div class="cgroup-tools"><input type="search" id="br-ap-search" placeholder="Filter by name / model / group…" autocomplete="off">
@@ -2959,6 +2963,8 @@
     ["br-ap-ch-g", "br-ap-ch-a", "br-ap-ch-6", "br-ap-pw-g", "br-ap-pw-a", "br-ap-pw-6"].forEach(function (id) {
       document.getElementById(id).value = "";
     });
+    document.querySelectorAll(".br-ap-mode").forEach(function (s) { s.value = ""; });
+    brApModeSync();
     brApCache = [];
     brSetMode(pre && pre.mode === "aps" && flavor === "classic" ? "aps" : "groups");
     var box = document.getElementById("br-groups");
@@ -3008,22 +3014,49 @@
     row.querySelector(".cr-msg").textContent = msg;
     out.appendChild(row);
   }
-  function brNorm(v) { return /^auto$/i.test(v) ? "0" : v; }
+  function brApMode(band) {
+    var s = document.querySelector('.br-ap-mode[data-band="' + band + '"]');
+    return s ? s.value : "";
+  }
+  function brApModeSync() {
+    var anyManual = false;
+    ["g", "a", "6"].forEach(function (band) {
+      var manual = brApMode(band) === "manual";
+      if (manual) anyManual = true;
+      document.querySelectorAll('.br-ap-manual [data-band="' + band + '"]').forEach(function (i) {
+        i.disabled = !manual;
+        if (!manual) i.value = "";
+      });
+    });
+    document.querySelectorAll(".br-ap-manual").forEach(function (r) { r.hidden = !anyManual; });
+  }
+  function brApBand(band) {
+    var m = brApMode(band);
+    if (!m) return { channel: "", power: "" };                    // leave unchanged
+    if (m === "auto") return { channel: "0", power: "0" };        // hand back to ARM/AirMatch
+    return { channel: document.getElementById("br-ap-ch-" + band).value.trim(),
+             power: document.getElementById("br-ap-pw-" + band).value.trim() };
+  }
   function brApRun() {
     brErr("");
-    function cell(chId, pwId) {
-      return { channel: brNorm(document.getElementById(chId).value.trim()),
-               power: brNorm(document.getElementById(pwId).value.trim()) };
+    var g = brApBand("g"), a = brApBand("a"), six = brApBand("6");
+    var touched = [g, a, six].some(function (x) { return x.channel || x.power; });
+    if (!touched && !["g", "a", "6"].some(function (b) { return brApMode(b); })) {
+      brErr("Set an assignment on at least one band."); return;
     }
-    var g = cell("br-ap-ch-g", "br-ap-pw-g");
-    var a = cell("br-ap-ch-a", "br-ap-pw-a");
-    var six = cell("br-ap-ch-6", "br-ap-pw-6");
-    if (!g.channel && !g.power && !a.channel && !a.power && !six.channel && !six.power) { brErr("Set at least one channel or power value."); return; }
     var aps = Array.prototype.map.call(document.querySelectorAll("#br-aps .bra:checked"),
       function (c) { return { serial: c.value, name: c.getAttribute("data-name"), arch: c.getAttribute("data-arch") || "Instant" }; });
     if (!aps.length) { brErr("Select at least one AP."); return; }
-    if ((six.channel && six.channel !== "0") && aps.some(function (x) { return x.arch !== "AOS10"; })) { brErr("6 GHz per-AP is AOS-10 only — deselect the Instant APs or clear 6 GHz."); return; }
-    if (!window.confirm("Apply channel / power to " + aps.length + " AP(s)? A fixed value stops ARM / AirMatch managing that radio.")) return;
+    if (brApMode("6") && aps.some(function (x) { return x.arch !== "AOS10"; })) {
+      brErr("6 GHz per-AP is AOS-10 only — deselect the Instant APs or set 6 GHz to “Leave unchanged”."); return;
+    }
+    if (brApMode("a") === "manual" && !a.channel && aps.some(function (x) { return x.arch === "AOS10"; })) {
+      brErr("5 GHz is set to Manual — enter a channel."); return;
+    }
+    if (brApMode("g") === "manual" && !g.channel && aps.some(function (x) { return x.arch === "AOS10"; })) {
+      brErr("2.4 GHz is set to Manual — enter a channel."); return;
+    }
+    if (!window.confirm("Apply radio settings to " + aps.length + " AP(s)?")) return;
     var out = document.getElementById("br-results"); out.innerHTML = "";
     var ap = document.getElementById("br-apply"); ap.disabled = true; ap.textContent = "Applying…";
     api("/api/config/classic/ap-radio", { method: "POST", body: JSON.stringify({
@@ -3089,6 +3122,9 @@
     b.addEventListener("click", function () { openBulkRadio(b.getAttribute("data-bulkradio")); });
   });
   document.getElementById("br-back").addEventListener("click", closeBulkRadio);
+  document.querySelectorAll(".br-ap-mode").forEach(function (s) {
+    s.addEventListener("change", brApModeSync);
+  });
   document.getElementById("br-preview").addEventListener("click", function () { brRun(true); });
   document.getElementById("br-apply").addEventListener("click", function () { brRun(false); });
   document.getElementById("br-group-search").addEventListener("input", function () { brRenderGroups(brGroupCache, this.value); });

@@ -2401,11 +2401,10 @@ def _aos10_radio_merge(block: list[str], bands: dict[str, dict[str, str]]) -> tu
             want[n] = None            # channel auto -> hand back to AirMatch
         else:
             eff_ch = ch or cur.get(n, ("", ""))[0]
-            eff_pw = pw or cur.get(n, ("", "0"))[1] or "0"
             if not eff_ch:
-                errs.append(f"radio {n}: pick a channel (there's no manual channel to keep)")
+                errs.append(f"radio {n}: pick a channel")
             else:
-                want[n] = f"  radio-{n}-channel {eff_ch} {eff_pw}"
+                want[n] = f"  radio-{n}-channel {eff_ch} {pw or '0'}"
     if errs:
         return block, errs
     out = [ln for ln in block if not re.match(r"\s*radio-[012]-channel\b", ln)]
