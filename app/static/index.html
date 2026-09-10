@@ -1151,38 +1151,65 @@
           <button type="button" class="linkbtn" id="acl-add" style="margin-top:4px">+ Add rule</button>
           <div class="hint" style="margin-top:6px">Service = Application / App category / Web category / Web reputation allows or denies by AppRF classification (applied on supported APs only). Values are CLI tokens — the suggestion lists aren't exhaustive, type any token your platform accepts. Use ↑ ↓ to reorder (first match wins); other rule options (time-range, throttle, …) on a loaded rule are preserved as-is.</div>
           <datalist id="dl-acl-app">
-            <option>amazon-web-services</option><option>appstore</option><option>bittorrent</option>
-            <option>box</option><option>dropbox</option><option>facebook</option><option>github</option>
-            <option>gmail</option><option>google-play</option><option>googleplus</option><option>gotomeeting</option>
-            <option>icloud</option><option>ipsec</option><option>itunes</option><option>linkedin</option>
-            <option>microsoft-office365</option><option>ms-update</option><option>netflix</option><option>pandora</option>
-            <option>salesforce</option><option>sharepoint</option><option>skype</option><option>skypeforbusiness</option>
-            <option>slack</option><option>spotify</option><option>teams</option><option>twitter</option>
-            <option>viber</option><option>webex</option><option>whatsapp</option><option>wikipedia</option><option>youtube</option>
+            <option>amazon</option><option>amazon-web-services</option><option>apple-appstore</option><option>appstore</option>
+            <option>bing</option><option>bittorrent</option><option>box</option><option>chrome-remote-desktop</option>
+            <option>citrix</option><option>cnn</option><option>dailymotion</option><option>discord</option>
+            <option>disney-plus</option><option>dns</option><option>dropbox</option><option>evernote</option>
+            <option>facebook</option><option>facebook-messenger</option><option>ftp</option><option>github</option>
+            <option>gmail</option><option>google</option><option>google-drive</option><option>google-hangouts</option>
+            <option>google-maps</option><option>google-meet</option><option>google-play</option><option>googleplus</option>
+            <option>gotomeeting</option><option>http</option><option>https</option><option>icloud</option>
+            <option>imap</option><option>instagram</option><option>ipsec</option><option>itunes</option>
+            <option>linkedin</option><option>microsoft</option><option>microsoft-office365</option><option>microsoft-teams</option>
+            <option>ms-onedrive</option><option>ms-update</option><option>netflix</option><option>ntp</option>
+            <option>outlook-web</option><option>pandora</option><option>pinterest</option><option>pop3</option>
+            <option>reddit</option><option>rtp</option><option>salesforce</option><option>sharepoint</option>
+            <option>sip</option><option>skype</option><option>skypeforbusiness</option><option>slack</option>
+            <option>smtp</option><option>snapchat</option><option>soundcloud</option><option>spotify</option>
+            <option>ssh</option><option>ssl</option><option>teams</option><option>telegram</option>
+            <option>tiktok</option><option>tinder</option><option>tor</option><option>twitch</option>
+            <option>twitter</option><option>viber</option><option>vimeo</option><option>vnc</option>
+            <option>webex</option><option>whatsapp</option><option>wikipedia</option><option>windows-live</option>
+            <option>xbox-live</option><option>yahoo</option><option>youtube</option><option>youtube-kids</option>
+            <option>youtube-music</option><option>zoom</option>
           </datalist>
           <datalist id="dl-acl-appcat">
             <option>antivirus</option><option>authentication</option><option>behavioral</option>
-            <option>cloud-file-storage</option><option>collaboration</option><option>encrypted</option>
-            <option>enterprise-apps</option><option>gaming</option><option>instant-messaging</option>
-            <option>mail-protocols</option><option>mobile</option><option>network-service</option>
-            <option>peer-to-peer</option><option>social-networking</option><option>standard</option>
-            <option>streaming</option><option>thin-client</option><option>tunneling</option>
-            <option>unified-communications</option><option>web</option><option>webmail</option>
+            <option>cloud-file-storage</option><option>collaboration</option><option>education</option>
+            <option>encrypted</option><option>enterprise-apps</option><option>gaming</option>
+            <option>instant-messaging</option><option>mail-protocols</option><option>mobile</option>
+            <option>network-service</option><option>peer-to-peer</option><option>photo-video</option>
+            <option>social-networking</option><option>standard</option><option>streaming</option>
+            <option>thin-client</option><option>tunneling</option><option>unified-communications</option>
+            <option>web</option><option>webmail</option>
           </datalist>
           <datalist id="dl-acl-webcat">
             <option>abortion</option><option>abused-drugs</option><option>adult-and-pornography</option>
             <option>alcohol-and-tobacco</option><option>auctions</option><option>bot-nets</option>
-            <option>business-and-economy</option><option>cdns</option><option>computer-and-internet-info</option>
-            <option>computer-and-internet-security</option><option>dating</option><option>educational-institutions</option>
-            <option>entertainment-and-arts</option><option>financial-services</option><option>gambling</option>
-            <option>games</option><option>government</option><option>hacking</option><option>health-and-medicine</option>
+            <option>business-and-economy</option><option>cdns</option><option>cheating</option>
+            <option>computer-and-internet-info</option><option>computer-and-internet-security</option>
+            <option>confirmed-spam-sources</option><option>content-delivery-networks</option><option>cult-and-occult</option>
+            <option>dating</option><option>dead-sites</option><option>dynamic-content</option>
+            <option>educational-institutions</option><option>entertainment-and-arts</option><option>fashion-and-beauty</option>
+            <option>financial-services</option><option>gambling</option><option>games</option><option>government</option>
+            <option>gross</option><option>hacking</option><option>hate-and-racism</option><option>health-and-medicine</option>
+            <option>home-and-garden</option><option>hunting-and-fishing</option><option>illegal</option>
+            <option>image-and-video-search</option><option>individual-stock-advice-and-tools</option>
             <option>internet-communications</option><option>internet-portals</option><option>job-search</option>
-            <option>malware-sites</option><option>military</option><option>news-and-media</option>
-            <option>online-greeting-cards</option><option>peer-to-peer</option><option>personal-sites-and-blogs</option>
-            <option>phishing-and-other-frauds</option><option>proxy-avoid-and-anonymizers</option><option>search-engines</option>
-            <option>shopping</option><option>social-networking</option><option>spam-urls</option><option>sports</option>
-            <option>streaming-media</option><option>training-and-tools</option><option>translation</option>
-            <option>travel</option><option>violence</option><option>weapons</option><option>web-advertisements</option>
+            <option>keyloggers-and-monitoring</option><option>kids</option><option>legal</option><option>local-information</option>
+            <option>malware-sites</option><option>marijuana</option><option>military</option><option>motor-vehicles</option>
+            <option>music</option><option>news-and-media</option><option>nudity</option><option>online-greeting-cards</option>
+            <option>open-http-proxies</option><option>parked-domains</option><option>pay-to-surf</option>
+            <option>peer-to-peer</option><option>personal-sites-and-blogs</option><option>personal-storage</option>
+            <option>philosophy-and-political-advocacy</option><option>phishing-and-other-frauds</option>
+            <option>private-ip-addresses</option><option>proxy-avoid-and-anonymizers</option><option>questionable</option>
+            <option>real-estate</option><option>recreation-and-hobbies</option><option>reference-and-research</option>
+            <option>religion</option><option>search-engines</option><option>sex-education</option>
+            <option>shareware-and-freeware</option><option>shopping</option><option>social-networking</option>
+            <option>society</option><option>spam-urls</option><option>sports</option><option>spyware-and-adware</option>
+            <option>streaming-media</option><option>swimsuits-and-intimate-apparel</option><option>training-and-tools</option>
+            <option>translation</option><option>travel</option><option>unconfirmed-spam-sources</option>
+            <option>violence</option><option>weapons</option><option>web-advertisements</option>
             <option>web-based-email</option><option>web-hosting</option>
           </datalist>
           <datalist id="dl-acl-webrep">
