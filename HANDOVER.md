@@ -565,18 +565,26 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
   entry). `_merge_cli_submerge` matches on the full header incl. name, so named
   and unnamed profiles are edited independently. A **Delete** button (shown once
   the name field is set) sends `{remove: rfpHeaders()}`.
-- **Add AP group** (`#grp-form`: name / admin password / device-type checkboxes /
-  switch types / AP network role):
-  - create: `POST /configuration/v1/groups`
-    `{group, group_attributes:{template_group:false, group_password}}` → 201,
-    then `PATCH /configuration/v2/groups/{name}/properties`
-    `{properties:{AllowedDevTypes, ApNetworkRole, AllowedSwitchTypes?}}`.
+- **Add AP group** (`#grp-form`: name + **Architecture** select):
+  - **AOS-8 / Instant** — `POST /configuration/v2/groups`
+    `{group, group_attributes:{group_password, template_info:{Wired,Wireless}},
+    group_properties:{AllowedDevTypes, ApNetworkRole, AllowedSwitchTypes?,
+    GwNetworkRole?}}` → 201. This endpoint **only ever makes Instant groups** —
+    any `Architecture` / `AOSVersion` in the body is silently ignored (verified
+    live: all combinations return 201 with `AOSVersion: AOS_8X`).
+  - **AOS-10** — `POST /configuration/v2/groups/clone`
+    `{group, clone_group:<an existing AOS-10 group>, upgrade_architecture:false}`
+    → 201, `AOSVersion: AOS_10X` / `Architecture: AOS10`, source's
+    `AllowedDevTypes` preserved. **The new group is a full copy** of the source
+    (SSIDs / RF profiles / access rules included). `GET /api/config/classic/groups`
+    now also returns `aos10: [...]` (from `/configuration/v1/groups/properties`,
+    batched ≤15 names/call) to populate the "Copy settings from" picker.
+    Cloning an AOS-8 group with `upgrade_architecture:true` also yields AOS-10
+    but strips AccessPoints from `AllowedDevTypes` (and a later properties PATCH
+    can't re-add it), so it isn't used.
   - delete: `DELETE /configuration/v1/groups/{name}` → 200. In the UI, delete is
     a danger button on the AP-group detail page (`openEntity` when
     `meta.kind === "group"`).
-  - **Architecture is always Instant / AOS-8** — the `aos10` flag, `Architecture`
-    in the create body, and a properties PATCH all return success but silently
-    no-op. An AOS-10 group must be created in the Central UI; the form says so.
 
 All the CLI-push cards share the group multi-select, **Preview merge** (exact
 per-group text) and a confirm-gated **Deploy**.

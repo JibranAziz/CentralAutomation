@@ -1227,27 +1227,45 @@
           <div class="field-row">
             <div class="field"><label class="lbl" for="grp-name">Group name <span class="req">*</span></label>
               <input type="text" id="grp-name" autocomplete="off" placeholder="Branch-01"></div>
+            <div class="field">
+              <label class="lbl" for="grp-arch">Architecture</label>
+              <select id="grp-arch"><option value="AOS10">ArubaOS 10</option><option value="Instant">ArubaOS 8 (Instant)</option></select>
+            </div>
+          </div>
+
+          <!-- AOS-10: clone an existing AOS-10 group -->
+          <div id="grp-aos10-fields">
+            <div class="field">
+              <label class="lbl" for="grp-clone">Copy settings from <span class="req">*</span></label>
+              <select id="grp-clone"><option value="">— pick an AOS-10 group —</option></select>
+            </div>
+            <div class="hint">Central's API can only make an AOS-10 group by copying an existing one. The new
+              group starts as a full copy of the chosen group — its SSIDs, RF profiles and access rules
+              come across, so review and adjust them after creating.</div>
+          </div>
+
+          <!-- AOS-8 / Instant: fresh group -->
+          <div id="grp-aos8-fields" hidden>
             <div class="field"><label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
               <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
                 <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div></div>
+            <div class="field">
+              <div class="lbl">Device types in this group</div>
+              <label class="chk"><input type="checkbox" class="grp-dev" value="AccessPoints" checked> Access Points</label>
+              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Gateways"> Gateways</label>
+              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Switches" id="grp-dev-sw"> Switches</label>
+            </div>
+            <div class="field" id="grp-sw-wrap" hidden>
+              <div class="lbl">Switch types</div>
+              <label class="chk"><input type="checkbox" class="grp-sw" value="AOS_S" checked> AOS-S</label>
+              <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-sw" value="AOS_CX" checked> AOS-CX</label>
+            </div>
+            <div class="field">
+              <label class="lbl" for="grp-aprole">AP network role</label>
+              <select id="grp-aprole"><option>Standard</option><option>Microbranch</option></select>
+            </div>
           </div>
-          <div class="field">
-            <div class="lbl">Device types in this group</div>
-            <label class="chk"><input type="checkbox" class="grp-dev" value="AccessPoints" checked> Access Points</label>
-            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Gateways"> Gateways</label>
-            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-dev" value="Switches" id="grp-dev-sw"> Switches</label>
-          </div>
-          <div class="field" id="grp-sw-wrap" hidden>
-            <div class="lbl">Switch types</div>
-            <label class="chk"><input type="checkbox" class="grp-sw" value="AOS_S" checked> AOS-S</label>
-            <label class="chk" style="margin-top:4px"><input type="checkbox" class="grp-sw" value="AOS_CX" checked> AOS-CX</label>
-          </div>
-          <div class="field">
-            <label class="lbl" for="grp-aprole">AP network role</label>
-            <select id="grp-aprole"><option>Standard</option><option>Microbranch</option></select>
-          </div>
-          <div class="hint">The group is created with the <strong>ArubaOS-8 / Instant</strong> architecture — Central's API
-            can't set or change it. For an ArubaOS-10 group, create it in the Central UI.</div>
+
           <div class="actions" style="margin-top:14px">
             <button type="button" class="btn" id="grp-create">Create group</button>
           </div>
@@ -2136,6 +2154,11 @@
     openConfig("acl");
   }
 
+  function grpArchSync() {
+    var aos10 = document.getElementById("grp-arch").value !== "Instant";
+    document.getElementById("grp-aos10-fields").hidden = !aos10;
+    document.getElementById("grp-aos8-fields").hidden = aos10;
+  }
   function grpReset() {
     document.getElementById("grp-name").value = "";
     document.getElementById("grp-pass").value = "";
@@ -2143,25 +2166,44 @@
     document.querySelectorAll(".grp-sw").forEach(function (c) { c.checked = true; });
     document.getElementById("grp-sw-wrap").hidden = true;
     document.getElementById("grp-aprole").value = "Standard";
+    document.getElementById("grp-arch").value = "AOS10";
+    grpArchSync();
+    var sel = document.getElementById("grp-clone");
+    sel.innerHTML = '<option value="">Loading AOS-10 groups…</option>';
+    api("/api/config/classic/groups").then(function (res) {
+      var a10 = (res.ok && res.body.aos10) || [];
+      sel.innerHTML = '<option value="">— pick an AOS-10 group —</option>';
+      a10.forEach(function (g) {
+        var o = document.createElement("option"); o.value = g; o.textContent = g;
+        sel.appendChild(o);
+      });
+      if (!a10.length) sel.innerHTML = '<option value="">no AOS-10 groups to copy from</option>';
+    });
   }
+  document.getElementById("grp-arch").addEventListener("change", grpArchSync);
   document.getElementById("grp-dev-sw").addEventListener("change", function () {
     document.getElementById("grp-sw-wrap").hidden = !this.checked;
   });
   document.getElementById("grp-create").addEventListener("click", function () {
     cfgErr("");
     var name = document.getElementById("grp-name").value.trim();
+    var arch = document.getElementById("grp-arch").value;
+    var aos10 = arch !== "Instant";
     var pass = document.getElementById("grp-pass").value;
+    var cloneFrom = document.getElementById("grp-clone").value;
     var dev = Array.prototype.map.call(document.querySelectorAll(".grp-dev:checked"), function (c) { return c.value; });
     var sw = Array.prototype.map.call(document.querySelectorAll(".grp-sw:checked"), function (c) { return c.value; });
     if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(name)) { cfgErr("Group name: letters, numbers, spaces, . _ - only (max 32)."); return; }
-    if (pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
-    if (!dev.length) { cfgErr("Pick at least one device type."); return; }
+    if (aos10 && !cloneFrom) { cfgErr("Pick an existing AOS-10 group to copy settings from."); return; }
+    if (!aos10 && pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
+    if (!aos10 && !dev.length) { cfgErr("Pick at least one device type."); return; }
     var out = document.getElementById("grp-results");
     var btn = this; btn.disabled = true; btn.textContent = "Creating…";
     out.innerHTML = "";
     api("/api/config/" + activeFlavor + "/group", {
       method: "POST",
-      body: JSON.stringify({ name: name, password: pass, devTypes: dev, swTypes: sw, apRole: document.getElementById("grp-aprole").value })
+      body: JSON.stringify({ name: name, password: pass, devTypes: dev, swTypes: sw,
+        apRole: document.getElementById("grp-aprole").value, arch: arch, cloneFrom: cloneFrom })
     }).then(function (res) {
       if (!res.ok) { cfgErr((res.body && res.body.error) || "Create failed."); return; }
       var r = res.body;
@@ -2169,8 +2211,7 @@
       row.className = "cres ok";
       row.innerHTML = '<span class="cr-dot"></span><span class="cr-grp"></span><span class="cr-msg"></span>';
       row.querySelector(".cr-grp").textContent = r.name;
-      row.querySelector(".cr-msg").textContent = "created — " + r.architecture +
-        (r.propertiesApplied ? "" : " (" + r.note + ")");
+      row.querySelector(".cr-msg").textContent = "created — " + r.architecture + (r.note ? " · " + r.note : "");
       out.appendChild(row);
       document.getElementById("grp-name").value = "";
       document.getElementById("grp-pass").value = "";

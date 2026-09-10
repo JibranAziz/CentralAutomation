@@ -2273,6 +2273,24 @@ async def topology(flavor: str, site_id: str, request: Request) -> JSONResponse:
 # --------------------------------------------------------------------------- #
 # Configuration writes (Classic Central only)
 # --------------------------------------------------------------------------- #
+async def _classic_group_props(cx: httpx.AsyncClient, host: str, hdr: dict[str, str],
+                               names: list[str]) -> dict[str, dict[str, Any]]:
+    """`{group: properties}` via /configuration/v1/groups/properties, batched
+    (the endpoint 400s on long group lists)."""
+    out: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(names), 15):
+        chunk = names[i:i + 15]
+        try:
+            r = await cx.get(f"https://{host}/configuration/v1/groups/properties",
+                             headers=hdr, params={"groups": ",".join(chunk)})
+            if r.status_code == 200:
+                for x in (r.json() or {}).get("data", []):
+                    out[x.get("group", "")] = x.get("properties", {}) or {}
+        except Exception:
+            continue
+    return out
+
+
 @app.get("/api/config/{flavor}/groups")
 async def config_groups(flavor: str, request: Request) -> JSONResponse:
     conn, err = _dash_conn(request, flavor)
@@ -2283,7 +2301,11 @@ async def config_groups(flavor: str, request: Request) -> JSONResponse:
     hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
     async with httpx.AsyncClient(timeout=45.0) as cx:
         names, _sc = await _classic_group_names(cx, conn["host"], hdr)
-    return JSONResponse({"groups": sorted(names or [], key=str.lower)})
+        names = sorted(names or [], key=str.lower)
+        props = await _classic_group_props(cx, conn["host"], hdr, names)
+    aos10 = sorted((g for g, p in props.items() if p.get("AOSVersion") == "AOS_10X"),
+                   key=str.lower)
+    return JSONResponse({"groups": names, "aos10": aos10})
 
 
 @app.get("/api/config/{flavor}/aps")
@@ -2403,9 +2425,20 @@ _GROUP_SW_TYPES = {"AOS_S", "AOS_CX"}
 
 @app.post("/api/config/{flavor}/group")
 async def config_group_create(flavor: str, request: Request) -> JSONResponse:
-    """Create a new AP/config group (Classic). Groups are always created with
-    the AOS-8 / Instant architecture — Central's API does not allow choosing or
-    changing it, so an AOS-10 group must be made in the Central UI."""
+    """Create a config group (Classic).
+
+    AOS-8 / Instant: `POST /configuration/v2/groups` (this endpoint only ever
+    makes Instant groups — the Architecture flag is silently ignored, confirmed
+    against a live tenant).
+
+    AOS-10: `POST /configuration/v2/groups/clone` from an existing AOS-10 group
+    (`upgrade_architecture=false`). This is the only Classic-API path that
+    yields a real AOS-10 group; the new group is a **copy** of the chosen
+    source (its SSIDs / RF profiles / access rules come across — edit or clear
+    them afterwards). Cloning an AOS-8 group with `upgrade_architecture=true`
+    also makes AOS-10 but drops AccessPoints from AllowedDevTypes, so it's not
+    used here.
+    """
     conn, err = _dash_conn(request, flavor)
     if err:
         return err
@@ -2417,33 +2450,49 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     dev_types = [t for t in (b.get("devTypes") or []) if t in _GROUP_DEV_TYPES] or ["AccessPoints"]
     sw_types = [t for t in (b.get("swTypes") or []) if t in _GROUP_SW_TYPES]
     ap_role = b.get("apRole") if b.get("apRole") in ("Standard", "Microbranch") else "Standard"
+    aos10 = str(b.get("arch") or "AOS10").upper() != "INSTANT"
+    clone_from = (b.get("cloneFrom") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
         return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
-    if len(password) < 6:
+    if aos10 and not clone_from:
+        return _err(400, "Pick an existing AOS-10 group to copy settings from.")
+    if not aos10 and len(password) < 6:
         return _err(400, "Group password must be at least 6 characters.")
 
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
     base = f"https://{conn['host']}"
     async with httpx.AsyncClient(timeout=45.0) as cx:
-        r = await cx.post(f"{base}/configuration/v1/groups", headers=hdr, json={
+        if aos10:
+            r = await cx.post(f"{base}/configuration/v2/groups/clone", headers=hdr, json={
+                "group": name, "clone_group": clone_from, "upgrade_architecture": False})
+            if not (200 <= r.status_code < 300):
+                return _err(502, f"Central rejected the clone ({r.status_code}): {(r.text or '')[:300]}")
+            _ap_cli_cache_clear(conn["host"])
+            return JSONResponse({
+                "ok": True, "name": name, "architecture": "AOS-10",
+                "propertiesApplied": True,
+                "note": f"copied from {clone_from} — review its SSIDs / rules / RF profiles",
+            })
+
+        gp: dict[str, Any] = {"AllowedDevTypes": dev_types,
+                              "ApNetworkRole": "Microbranch" if ap_role == "Microbranch" else "Standard"}
+        if "Switches" in dev_types and sw_types:
+            gp["AllowedSwitchTypes"] = sw_types
+        if "Gateways" in dev_types:
+            gp["GwNetworkRole"] = "BranchGateway"
+        r = await cx.post(f"{base}/configuration/v2/groups", headers=hdr, json={
             "group": name,
-            "group_attributes": {"template_group": False, "group_password": password},
+            "group_attributes": {"group_password": password,
+                                 "template_info": {"Wired": False, "Wireless": False}},
+            "group_properties": gp,
         })
         if not (200 <= r.status_code < 300):
             return _err(502, f"Central rejected the group ({r.status_code}): {(r.text or '')[:300]}")
-        props: dict[str, Any] = {"AllowedDevTypes": dev_types, "ApNetworkRole": ap_role}
-        if "Switches" in dev_types and sw_types:
-            props["AllowedSwitchTypes"] = sw_types
-        pr = await cx.patch(
-            f"{base}/configuration/v2/groups/{quote(name, safe='')}/properties",
-            headers=hdr, json={"properties": props})
-        props_ok = 200 <= pr.status_code < 300
     _ap_cli_cache_clear(conn["host"])
     return JSONResponse({
         "ok": True, "name": name, "architecture": "Instant (AOS-8)",
-        "propertiesApplied": props_ok,
-        "note": "" if props_ok else f"group created; properties not applied ({pr.status_code})",
+        "propertiesApplied": True, "note": "",
     })
 
 
