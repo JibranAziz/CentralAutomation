@@ -1233,14 +1233,15 @@
             </div>
           </div>
 
-          <div class="hint" id="grp-aos10-note" hidden>Creates a blank ArubaOS 10 group
-            (<code>POST /configuration/v3/groups</code>). Add SSIDs / RF profiles / access rules
-            with the configuration cards afterwards.</div>
+          <div class="hint" id="grp-aos10-note" hidden>Creates a blank ArubaOS 10 group.
+            Add SSIDs / RF profiles / access rules with the configuration cards afterwards.
+            AOS-10 APs also carry their own regulatory domain — the group country here is a
+            default; the AP may already have one set at device level.</div>
 
           <div class="field-row">
             <div class="field" id="grp-country-field">
               <label class="lbl" for="grp-country">Country code</label>
-              <select id="grp-country"><option value="">— AP default —</option></select>
+              <select id="grp-country"><option value="">— none —</option></select>
             </div>
             <div class="field">
               <label class="lbl" for="grp-tz">Timezone</label>
@@ -1248,10 +1249,9 @@
             </div>
           </div>
 
-          <!-- AOS-8 / Instant only -->
-          <div class="field" id="grp-pass-field" hidden>
-            <label class="lbl" for="grp-pass">Group admin password <span class="req">*</span></label>
-            <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="min 6 characters">
+          <div class="field" id="grp-pass-field">
+            <label class="lbl" for="grp-pass">Device admin password <span class="req">*</span></label>
+            <div class="secret"><input type="password" id="grp-pass" autocomplete="new-password" placeholder="6–64 chars · A–Z a–z 0–9 ! @ $ % ^ &amp; * ( ) _ + = . -">
               <button type="button" class="reveal" data-reveal="grp-pass" aria-label="Show password"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.3"/></svg></button></div>
           </div>
 
@@ -2184,8 +2184,6 @@
   function grpArchSync() {
     var aos10 = document.getElementById("grp-arch").value !== "Instant";
     document.getElementById("grp-aos10-note").hidden = !aos10;
-    document.getElementById("grp-pass-field").hidden = aos10;
-    document.getElementById("grp-country-field").hidden = aos10;
   }
   function grpReset() {
     document.getElementById("grp-name").value = "";
@@ -2213,7 +2211,7 @@
     var dev = Array.prototype.map.call(document.querySelectorAll(".grp-dev:checked"), function (c) { return c.value; });
     var sw = Array.prototype.map.call(document.querySelectorAll(".grp-sw:checked"), function (c) { return c.value; });
     if (!/^[A-Za-z0-9 _.\-]{1,32}$/.test(name)) { cfgErr("Group name: letters, numbers, spaces, . _ - only (max 32)."); return; }
-    if (!aos10 && pass.length < 6) { cfgErr("Group password must be at least 6 characters."); return; }
+    if (!/^[A-Za-z0-9!@$%^&*()_+=.\-]{6,64}$/.test(pass)) { cfgErr("Admin password: 6–64 chars, letters/digits and ! @ $ % ^ & * ( ) _ + = . - only."); return; }
     if (!dev.length) { cfgErr("Pick at least one device type."); return; }
     var out = document.getElementById("grp-results");
     var btn = this; btn.disabled = true; btn.textContent = "Creating…";

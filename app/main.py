@@ -2423,43 +2423,6 @@ _GROUP_DEV_TYPES = {"AccessPoints", "Gateways", "Switches"}
 _GROUP_SW_TYPES = {"AOS_S", "AOS_CX"}
 
 
-_SYS_ACL_NAMES = {"default_wired_port_profile", "wired-SetMeUp"}
-_TIME_LINE_PREFIXES = ("clock timezone ", "clock summer-time ", "ntp-server ")
-
-
-def _group_cli_adjust(cli: list[str], *, drop_ssids: bool, drop_rf: bool,
-                      drop_roles: bool, drop_time: bool,
-                      country: str = "", timezone: str = "") -> list[str]:
-    """Prune copied blocks / set country & timezone on a freshly-cloned group.
-
-    RF prune only removes *named* radio profiles — the bare group-default
-    `rf dot11X-radio-profile` blocks (and `arm`) are structural and must stay,
-    or the AOS-10 APs won't sync.
-    """
-    out = list(cli)
-    for blk in _cli_blocks(list(out)):
-        h = blk[0].strip()
-        if drop_ssids and h.startswith("wlan ssid-profile "):
-            out = _cli_drop_block(out, h)
-        elif drop_roles and h.startswith("wlan access-rule "):
-            if _unquote(h[len("wlan access-rule "):]) not in _SYS_ACL_NAMES:
-                out = _cli_drop_block(out, h)
-        elif drop_rf and h.startswith("rf ") and "radio-profile" in h:
-            # keep unnamed group defaults ("rf dot11a-radio-profile"),
-            # drop only named ones ("rf dot11a-radio-profile <name>")
-            if len(h.split()) > 2:
-                out = _cli_drop_block(out, h)
-    if drop_time:
-        out = [ln for ln in out if not ln.startswith(_TIME_LINE_PREFIXES)]
-    if country:
-        out = [ln for ln in out if not ln.startswith("virtual-controller-country")]
-        out.append(f"virtual-controller-country {country}")
-    if timezone:
-        out = [ln for ln in out if not ln.startswith("clock timezone ")]
-        out.append(f"clock timezone {timezone}")
-    return out
-
-
 async def _push_group_cli(cx: httpx.AsyncClient, base: str, hdr: dict[str, str],
                           host: str, group: str, cli: list[str]) -> tuple[bool, str]:
     r = await cx.post(f"{base}/configuration/v1/ap_cli/{quote(group, safe='')}",
@@ -2515,8 +2478,9 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
         return _err(400, "Bad timezone value.")
     if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,32}", name):
         return _err(400, "Group name: letters, numbers, spaces, . _ - only (max 32).")
-    if not aos10 and len(password) < 6:
-        return _err(400, "Group password must be at least 6 characters.")
+    if not re.fullmatch(r"[A-Za-z0-9!@$%^&*()_+=.\-]{6,64}", password):
+        return _err(400, "Admin password: 6-64 chars, letters/digits and !@$%^&*()_+=.- only "
+                         "(no spaces, #, quotes).")
 
     hdr = {"Authorization": f"Bearer {conn['access_token']}",
            "Content-Type": "application/json", "Accept": "application/json"}
@@ -2535,6 +2499,7 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
     async with httpx.AsyncClient(timeout=60.0) as cx:
         if aos10:
             body = {"group": name, "group_attributes": {
+                "group_password": password,
                 "template_info": {"Wired": False, "Wireless": False},
                 "group_properties": gp}}
             r = await cx.post(f"{base}/configuration/v3/groups", headers=hdr, json=body)
@@ -2558,22 +2523,41 @@ async def config_group_create(flavor: str, request: Request) -> JSONResponse:
             arch_label = "Instant (AOS-8)"
 
         _ap_cli_cache_clear(conn["host"])
-        note = ""
-        if aos10 and country:
-            note = "country not set (regulatory domain is per-AP on AOS-10)"
-            country = ""
-        if country or timezone:
+        done: list[str] = []
+
+        # country: the dedicated group-country API (a real AOS-10 group like
+        # Jibran-Home-AOS10 stores its country here, not as a CLI line — the
+        # virtual-controller-country CLI line breaks AOS-10 sync). UI groups only.
+        if country:
+            cr = await cx.put(f"{base}/configuration/v1/country", headers=hdr,
+                              json={"groups": [name], "country": country})
+            done.append(f"country {country}" if 200 <= cr.status_code < 300
+                        else f"country not set ({cr.status_code})")
+
+        # admin password (AOS-10) + timezone: one AP-CLI merge.
+        #  - `mgmt-user admin <pw>` is the Instant command; Central stores it
+        #    hashed. Strip existing mgmt lines first so it replaces, not dupes.
+        #    (v2 create already set the Instant password; v3 group_password is
+        #    unreliable, so push it for AOS-10.)
+        if (aos10 and password) or timezone:
             cur, sc, msg = await _ap_cli_get(cx, conn["host"], hdr, name, use_cache=False)
-            adj = _group_cli_adjust(cur or [], drop_ssids=False, drop_rf=False,
-                                    drop_roles=False, drop_time=False,
-                                    country=country, timezone=timezone)
-            ok, perr = await _push_group_cli(cx, base, hdr, conn["host"], name, adj)
-            note = (", ".join(x for x in (f"country {country}" if country else "",
-                                          "timezone set" if timezone else "") if x)
-                    if ok else f"created; country/timezone not set ({perr})")
+            merged = list(cur or [])
+            if aos10 and password:
+                merged = [ln for ln in merged if not ln.strip().startswith(
+                    ("hash-mgmt-user", "hash-mgmt-password", "mgmt-user"))]
+                merged.insert(0, f"mgmt-user admin {password}")
+            if timezone:
+                merged = [ln for ln in merged if not ln.startswith("clock timezone ")]
+                merged.append(f"clock timezone {timezone}")
+            ok, perr = await _push_group_cli(cx, base, hdr, conn["host"], name, merged)
+            if aos10 and password:
+                done.append("password set" if ok else f"password not set ({perr})")
+            if timezone:
+                done.append("timezone set" if ok else f"timezone not set ({perr})")
+
     return JSONResponse({
         "ok": True, "name": name, "architecture": arch_label,
-        "propertiesApplied": True, "note": note,
+        "propertiesApplied": True, "note": "; ".join(done),
     })
 
 

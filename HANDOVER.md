@@ -565,19 +565,22 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
   entry). `_merge_cli_submerge` matches on the full header incl. name, so named
   and unnamed profiles are edited independently. A **Delete** button (shown once
   the name field is set) sends `{remove: rfpHeaders()}`.
-- **Add AP group** (`#grp-form`) — name + Architecture, device types, AP role,
-  optional timezone (and country for Instant).
-  - **AOS-8 / Instant**: `POST /configuration/v2/groups` (`group_attributes.group_password`
-    + `group_properties` at top level).
-  - **AOS-10**: `POST /configuration/v3/groups` — **`group_properties` must be
-    NESTED inside `group_attributes`** (v3 schema), with `Architecture: "AOS10"`.
-    Creates a real *blank* AOS-10 group (~70-line skeleton). No password. If the
-    call 400s mentioning `cust_id`, `_classic_customer_id` looks it up and
-    retries with `?cust_id=`.  *(The earlier clone-then-strip approach is gone —
-    cloned "AOS_10X" groups never synced to APs; a v3-created blank one is a
-    proper group.)*
-  - `virtual-controller-country <CC>` (Instant only — AOS-10 APs reject it) and
-    `clock timezone <name> <h> <m>` are pushed via an AP-CLI merge after create.
+- **Add AP group** (`#grp-form`) — name, Architecture, **device admin password**
+  (required, both archs; 6-64 chars, `[A-Za-z0-9!@$%^&*()_+=.-]` — it's pushed
+  via CLI so no `#` / spaces / quotes), device types, AP role, optional country
+  + timezone.
+  - **AOS-8 / Instant**: `POST /configuration/v2/groups` (`group_attributes.group_password`).
+  - **AOS-10**: `POST /configuration/v3/groups` — `group_properties` **nested in
+    `group_attributes`**, `Architecture:"AOS10"`. Creates a real blank group.
+    Password is then pushed as `mgmt-user admin <pw>` via an AP-CLI merge
+    (strips existing `hash-mgmt-*` / `mgmt-user` lines first; Central re-hashes).
+    The `system_config` POST endpoint 500s ("DHCP_POOL"), so it's not used.
+  - **country**: `PUT /configuration/v1/country {groups:[name], country}` — the
+    dedicated group-country API (a real AOS-10 group like `Jibran-Home-AOS10`
+    keeps its country here, *not* as a CLI line; `virtual-controller-country`
+    breaks AOS-10 sync). Works for both archs, UI groups only, APs reboot to
+    apply.
+  - **timezone**: `clock timezone <name> <h> <m>` via AP-CLI merge.
   - delete: `DELETE /configuration/v1/groups/{name}` → 200.
 
 All the CLI-push cards share the group multi-select, **Preview merge** (exact
