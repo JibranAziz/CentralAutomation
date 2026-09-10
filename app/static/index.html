@@ -311,11 +311,19 @@
     border-radius: 9px; padding: 10px 12px;
   }
   #config-form input[data-mono] { font-family: var(--mono); font-size: 12.5px; }
-  .acl-row { display: grid; grid-template-columns: 92px 1fr 76px 1fr 78px auto auto; gap: 6px; align-items: center; margin-bottom: 6px; }
+  #config-form.acl-wide { max-width: 780px; }
+  .acl-row { display: grid; grid-template-columns: 82px minmax(80px,1fr) 116px minmax(80px,1fr) 74px auto; gap: 6px; align-items: center; margin-bottom: 6px; }
   .acl-row select, .acl-row input[type="text"] { padding: 5px 7px; font-size: 12px; border-radius: 7px; min-width: 0; }
-  .acl-row .acl-log { font-size: 12px; white-space: nowrap; }
+  .acl-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .acl-actions .chk { font-size: 12px; }
   .acl-row .acl-del { font-size: 13px; padding: 0 4px; }
-  @media (max-width: 640px) { .acl-row { grid-template-columns: 1fr 1fr; } }
+  .acl-move {
+    appearance: none; background: none; border: none; cursor: pointer; padding: 2px 3px;
+    color: var(--faint); font-size: 11px; line-height: 1; border-radius: 5px;
+  }
+  .acl-move:hover:not(:disabled) { color: var(--accent); background: var(--accent-wash); }
+  .acl-move:disabled { opacity: .3; cursor: default; }
+  @media (max-width: 680px) { .acl-row { grid-template-columns: 1fr 1fr; } #config-form.acl-wide { max-width: 560px; } }
   .rfp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .rfp-table th, .rfp-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
   .rfp-table thead th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
@@ -1141,7 +1149,46 @@
           <div class="lbl" style="margin-top:10px">Rules — evaluated top to bottom, first match wins</div>
           <div id="acl-rules"></div>
           <button type="button" class="linkbtn" id="acl-add" style="margin-top:4px">+ Add rule</button>
-          <div class="hint" style="margin-top:6px">Options beyond permit/deny + log (time-range, throttle, app-category, …) on a loaded rule are preserved as-is.</div>
+          <div class="hint" style="margin-top:6px">Service = Application / App category / Web category / Web reputation lets you allow or deny by AppRF classification (supported platforms only). Values are the CLI tokens — check the generated CLI before deploying. Use ↑ ↓ to reorder; other rule options (time-range, throttle, …) on a loaded rule are preserved as-is.</div>
+          <datalist id="dl-acl-app">
+            <option>amazon-web-services</option><option>appstore</option><option>bittorrent</option>
+            <option>box</option><option>dropbox</option><option>facebook</option><option>github</option>
+            <option>gmail</option><option>google-play</option><option>googleplus</option><option>gotomeeting</option>
+            <option>icloud</option><option>ipsec</option><option>itunes</option><option>linkedin</option>
+            <option>microsoft-office365</option><option>ms-update</option><option>netflix</option><option>pandora</option>
+            <option>salesforce</option><option>sharepoint</option><option>skype</option><option>skypeforbusiness</option>
+            <option>slack</option><option>spotify</option><option>teams</option><option>twitter</option>
+            <option>viber</option><option>webex</option><option>whatsapp</option><option>wikipedia</option><option>youtube</option>
+          </datalist>
+          <datalist id="dl-acl-appcat">
+            <option>antivirus</option><option>authentication</option><option>behavioral</option>
+            <option>cloud-file-storage</option><option>collaboration</option><option>encrypted</option>
+            <option>enterprise-apps</option><option>gaming</option><option>instant-messaging</option>
+            <option>mail-protocols</option><option>mobile</option><option>network-service</option>
+            <option>peer-to-peer</option><option>standard</option><option>streaming</option>
+            <option>thin-client</option><option>tunneling</option><option>unified-communications</option>
+            <option>web</option><option>webmail</option>
+          </datalist>
+          <datalist id="dl-acl-webcat">
+            <option>abortion</option><option>abused-drugs</option><option>adult-and-pornography</option>
+            <option>alcohol-and-tobacco</option><option>auctions</option><option>bot-nets</option>
+            <option>business-and-economy</option><option>cdns</option><option>computer-and-internet-info</option>
+            <option>computer-and-internet-security</option><option>dating</option><option>educational-institutions</option>
+            <option>entertainment-and-arts</option><option>financial-services</option><option>gambling</option>
+            <option>games</option><option>government</option><option>hacking</option><option>health-and-medicine</option>
+            <option>internet-communications</option><option>internet-portals</option><option>job-search</option>
+            <option>malware-sites</option><option>military</option><option>news-and-media</option>
+            <option>online-greeting-cards</option><option>peer-to-peer</option><option>personal-sites-and-blogs</option>
+            <option>phishing-and-other-frauds</option><option>proxy-avoid-and-anonymizers</option><option>search-engines</option>
+            <option>shopping</option><option>social-networking</option><option>spam-urls</option><option>sports</option>
+            <option>streaming-media</option><option>training-and-tools</option><option>translation</option>
+            <option>travel</option><option>violence</option><option>weapons</option><option>web-advertisements</option>
+            <option>web-based-email</option><option>web-hosting</option>
+          </datalist>
+          <datalist id="dl-acl-webrep">
+            <option>trustworthy</option><option>low-risk</option><option>moderate-risk</option>
+            <option>suspicious</option><option>high-risk</option>
+          </datalist>
           <details class="gen-cli" style="margin-top:10px"><summary>Generated CLI</summary><pre id="acl-cli-view"></pre></details>
           <div id="acl-delete-wrap" hidden style="margin-top:12px">
             <button type="button" class="linkbtn danger" id="acl-delete">Delete this access rule from the selected groups</button>
@@ -1990,6 +2037,7 @@
     document.getElementById("rfp-form").hidden = !isRf;
     document.getElementById("grp-form").hidden = !isGroup;
     document.getElementById("aclform").hidden = !isAcl;
+    configForm.classList.toggle("acl-wide", isAcl);
     document.getElementById("rf-cli-details").hidden = !(isRadius || isRf);
     document.getElementById("cf-load-name").hidden = false;
     // the shared deploy machinery is not used for "Add AP group"
@@ -2334,7 +2382,20 @@
   /* ---- Access rule / user role editor ---- */
   var aclLoadedName = "";
   var ACL_DEST = [["any", "Any"], ["host", "Host IP"], ["alias", "Hostname / alias"], ["net", "Network"]];
-  var ACL_SVC = [["any", "Any"], ["tcp", "TCP"], ["udp", "UDP"], ["icmp", "ICMP"], ["app", "App"]];
+  var ACL_SVC = [["any", "Any"], ["tcp", "TCP"], ["udp", "UDP"], ["icmp", "ICMP"], ["proto", "IP proto"],
+    ["app", "Application"], ["appcat", "App category"], ["webcat", "Web category"], ["webrep", "Web reputation"]];
+  // service type -> { datalist id, placeholder, hasValue }
+  var ACL_SVC_META = {
+    any:    { dl: "", ph: "—", val: false },
+    tcp:    { dl: "", ph: "443 or 443-445", val: true },
+    udp:    { dl: "", ph: "53 or 67-68", val: true },
+    icmp:   { dl: "", ph: "—", val: false },
+    proto:  { dl: "", ph: "protocol # (e.g. 47)", val: true },
+    app:    { dl: "dl-acl-app", ph: "youtube", val: true },
+    appcat: { dl: "dl-acl-appcat", ph: "streaming", val: true },
+    webcat: { dl: "dl-acl-webcat", ph: "social-networking", val: true },
+    webrep: { dl: "dl-acl-webrep", ph: "suspicious", val: true },
+  };
   function aclEl(id) { return document.getElementById("acl-" + id); }
   function aclReset() {
     aclEl("utf8").checked = true;
@@ -2350,6 +2411,22 @@
       return '<option value="' + o[0] + '"' + (o[0] === val ? " selected" : "") + '>' + o[1] + '</option>';
     }).join("");
   }
+  function aclSyncSvcVal(d) {
+    var t = d.querySelector(".acl-svc").value;
+    var meta = ACL_SVC_META[t] || ACL_SVC_META.any;
+    var v = d.querySelector(".acl-svc-v");
+    v.placeholder = meta.ph;
+    v.disabled = !meta.val;
+    if (meta.dl) v.setAttribute("list", meta.dl); else v.removeAttribute("list");
+    if (!meta.val) v.value = "";
+  }
+  function aclRefreshMoves() {
+    var rows = aclEl("rules").querySelectorAll(".acl-row");
+    rows.forEach(function (row, i) {
+      row.querySelector(".acl-up").disabled = i === 0;
+      row.querySelector(".acl-down").disabled = i === rows.length - 1;
+    });
+  }
   function aclAddRow(r) {
     var d = document.createElement("div");
     d.className = "acl-row";
@@ -2357,16 +2434,31 @@
       '<select class="acl-dest">' + aclOpt(ACL_DEST, r.dest || "any") + '</select>' +
       '<input type="text" class="acl-dest-v" data-mono placeholder="10.0.0.5 / *.example.com" value="' + (r.destv || "").replace(/"/g, "&quot;") + '">' +
       '<select class="acl-svc">' + aclOpt(ACL_SVC, r.svc || "any") + '</select>' +
-      '<input type="text" class="acl-svc-v" data-mono placeholder="443 or 443-445 / youtube" value="' + (r.svcv || "").replace(/"/g, "&quot;") + '">' +
+      '<input type="text" class="acl-svc-v" data-mono value="' + (r.svcv || "").replace(/"/g, "&quot;") + '">' +
       '<select class="acl-act"><option value="permit"' + (r.act === "deny" ? "" : " selected") + '>permit</option><option value="deny"' + (r.act === "deny" ? " selected" : "") + '>deny</option></select>' +
-      '<label class="chk acl-log"><input type="checkbox" class="acl-log-cb"' + (r.log ? " checked" : "") + '> log</label>' +
-      '<button type="button" class="linkbtn danger acl-del">✕</button>';
+      '<div class="acl-actions">' +
+        '<label class="chk acl-log"><input type="checkbox" class="acl-log-cb"' + (r.log ? " checked" : "") + '> log</label>' +
+        '<button type="button" class="acl-move acl-up" title="Move up">▲</button>' +
+        '<button type="button" class="acl-move acl-down" title="Move down">▼</button>' +
+        '<button type="button" class="linkbtn danger acl-del">✕</button>' +
+      '</div>';
     d.setAttribute("data-raw", r.raw || "");
     aclEl("rules").appendChild(d);
+    aclSyncSvcVal(d);
     d.querySelectorAll("select,input").forEach(function (x) {
       x.addEventListener("input", aclToCli); x.addEventListener("change", aclToCli);
     });
-    d.querySelector(".acl-del").addEventListener("click", function () { d.remove(); aclToCli(); });
+    d.querySelector(".acl-svc").addEventListener("change", function () { aclSyncSvcVal(d); aclToCli(); });
+    d.querySelector(".acl-del").addEventListener("click", function () { d.remove(); aclRefreshMoves(); aclToCli(); });
+    d.querySelector(".acl-up").addEventListener("click", function () {
+      var p = d.previousElementSibling;
+      if (p) { d.parentNode.insertBefore(d, p); aclRefreshMoves(); aclToCli(); }
+    });
+    d.querySelector(".acl-down").addEventListener("click", function () {
+      var n = d.nextElementSibling;
+      if (n) { d.parentNode.insertBefore(n, d); aclRefreshMoves(); aclToCli(); }
+    });
+    aclRefreshMoves();
   }
   document.getElementById("acl-add").addEventListener("click", function () { aclAddRow({}); aclToCli(); });
   ["acl-utf8", "acl-cp", "acl-vlan"].forEach(function (id) {
@@ -2386,6 +2478,13 @@
     if (t === "any") return "any any any";
     if (t === "icmp") return "icmp any any";
     if (t === "app") return "app " + (v || "any");
+    if (t === "appcat") return "appcategory " + (v || "any");
+    if (t === "webcat") return "webcategory " + (v || "any");
+    if (t === "webrep") return "webreputation " + (v || "any").toLowerCase().replace(/\s+/g, "-");
+    if (t === "proto") {
+      var pp = v.split(/[-\s]+/);
+      return (pp[0] || "0") + " " + (pp[1] || "any") + " " + (pp[2] || pp[1] || "any");
+    }
     var pr = v.split(/[-\s]+/); var a = pr[0] || "0"; var b = pr[1] || a;
     return t + " " + a + " " + b;
   }
@@ -2432,10 +2531,19 @@
         else { r.dest = "net"; r.destv = src.join(" "); }
         if (!proto.length || proto[0] === "any") { r.svc = "any"; }
         else if (proto[0] === "icmp") { r.svc = "icmp"; }
-        else if (proto[0] === "app" || proto[0] === "appcategory") { r.svc = "app"; r.svcv = proto.slice(1).join(" "); }
+        else if (proto[0] === "app") { r.svc = "app"; r.svcv = proto.slice(1).join(" "); }
+        else if (proto[0] === "appcategory") { r.svc = "appcat"; r.svcv = proto.slice(1).join(" "); }
+        else if (proto[0] === "webcategory") { r.svc = "webcat"; r.svcv = proto.slice(1).join(" "); }
+        else if (proto[0] === "webreputation") { r.svc = "webrep"; r.svcv = proto.slice(1).join(" "); }
         else if (proto[0] === "tcp" || proto[0] === "udp") {
           r.svc = proto[0];
           r.svcv = proto[1] === proto[2] ? (proto[1] || "") : ((proto[1] || "") + "-" + (proto[2] || ""));
+        }
+        else if (/^\d+$/.test(proto[0])) {
+          r.svc = "proto";
+          var pv = [proto[0]];
+          if (proto[1] && proto[1] !== "any") pv.push(proto[2] && proto[2] !== proto[1] ? proto[1] + "-" + proto[2] : proto[1]);
+          r.svcv = pv.join(" ");
         } else { r.svc = "any"; }
         r.log = opts.indexOf("log") !== -1;
         r.raw = opts.filter(function (x) { return x !== "log"; }).join(" ");

@@ -433,10 +433,19 @@ end of `openConfig`'s group-list fetch so the preselect can't race the render.
 
 **Edit** (Classic only) — "Configure access rule" config card (`#aclform`):
 name + `utf8` + optional VLAN / captive-portal, plus a **row builder** — each
-rule is Destination (any / host IP / alias / network) + Service (any / tcp /
-udp / icmp / app + ports) + permit/deny + `log`. Options beyond that on a
-loaded rule (`time-range`, `throttle`, …) are kept verbatim in a per-row
-`data-raw`. `aclToCli` emits the `wlan access-rule` block; pushed via
+rule is Destination (any / host IP / alias / network) + **Service** + permit/deny
++ `log`, with **↑ ↓ reorder** buttons per row (order is significant — first
+match wins). Service types (`ACL_SVC` / `ACL_SVC_META`): `any`, `tcp`, `udp`,
+`icmp`, `proto` (IP protocol #), `app` → `match app <v>`, `appcat` →
+`match appcategory <v>`, `webcat` → `match webcategory <v>`, `webrep` →
+`match webreputation <v>` (value lower-cased + hyphenated). The app / category /
+reputation value field is a `<datalist>`-backed free-text input (`dl-acl-app`,
+`dl-acl-appcat`, `dl-acl-webcat`, `dl-acl-webrep` — CLI tokens, not display
+names) so any value the platform accepts can still be typed; the datalists are
+seeded lists, not exhaustive. `fillAclFromCli` parses all of these back.
+Options beyond that on a loaded rule (`time-range`, `throttle`, …) are kept
+verbatim in a per-row `data-raw`. `aclToCli` emits the `wlan access-rule`
+block; pushed via
 `POST /api/config/classic/cli` with **block-replace** (`_merge_cli`, no
 submerge — an ACL is an ordered list you define whole). "Load from" pulls a
 rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
