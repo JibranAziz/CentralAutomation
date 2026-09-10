@@ -443,6 +443,10 @@ reputation value field is a `<datalist>`-backed free-text input (`dl-acl-app`,
 `dl-acl-appcat`, `dl-acl-webcat`, `dl-acl-webrep` — CLI tokens, not display
 names) so any value the platform accepts can still be typed; the datalists are
 seeded lists, not exhaustive. `fillAclFromCli` parses all of these back.
+Verified live against an Instant/AOS-10 group's AP-CLI: `match app <name>`
+(incl. multi-word, e.g. `match app Streaming Media`), `match appcategory <c>`,
+`match webcategory <c>`, `match webreputation <lvl>` and `match <proto#> …` are
+all accepted and stored verbatim.
 Options beyond that on a loaded rule (`time-range`, `throttle`, …) are kept
 verbatim in a per-row `data-raw`. `aclToCli` emits the `wlan access-rule`
 block; pushed via

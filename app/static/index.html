@@ -1149,7 +1149,7 @@
           <div class="lbl" style="margin-top:10px">Rules — evaluated top to bottom, first match wins</div>
           <div id="acl-rules"></div>
           <button type="button" class="linkbtn" id="acl-add" style="margin-top:4px">+ Add rule</button>
-          <div class="hint" style="margin-top:6px">Service = Application / App category / Web category / Web reputation lets you allow or deny by AppRF classification (supported platforms only). Values are the CLI tokens — check the generated CLI before deploying. Use ↑ ↓ to reorder; other rule options (time-range, throttle, …) on a loaded rule are preserved as-is.</div>
+          <div class="hint" style="margin-top:6px">Service = Application / App category / Web category / Web reputation allows or denies by AppRF classification (applied on supported APs only). Values are CLI tokens — the suggestion lists aren't exhaustive, type any token your platform accepts. Use ↑ ↓ to reorder (first match wins); other rule options (time-range, throttle, …) on a loaded rule are preserved as-is.</div>
           <datalist id="dl-acl-app">
             <option>amazon-web-services</option><option>appstore</option><option>bittorrent</option>
             <option>box</option><option>dropbox</option><option>facebook</option><option>github</option>
@@ -1165,9 +1165,9 @@
             <option>cloud-file-storage</option><option>collaboration</option><option>encrypted</option>
             <option>enterprise-apps</option><option>gaming</option><option>instant-messaging</option>
             <option>mail-protocols</option><option>mobile</option><option>network-service</option>
-            <option>peer-to-peer</option><option>standard</option><option>streaming</option>
-            <option>thin-client</option><option>tunneling</option><option>unified-communications</option>
-            <option>web</option><option>webmail</option>
+            <option>peer-to-peer</option><option>social-networking</option><option>standard</option>
+            <option>streaming</option><option>thin-client</option><option>tunneling</option>
+            <option>unified-communications</option><option>web</option><option>webmail</option>
           </datalist>
           <datalist id="dl-acl-webcat">
             <option>abortion</option><option>abused-drugs</option><option>adult-and-pornography</option>
@@ -2396,6 +2396,10 @@
     webcat: { dl: "dl-acl-webcat", ph: "social-networking", val: true },
     webrep: { dl: "dl-acl-webrep", ph: "suspicious", val: true },
   };
+  // Verified live against Instant/AOS-10 AP-CLI: `match app <name>` (incl.
+  // multi-word like "Streaming Media"), `match appcategory <cat>`,
+  // `match webcategory <cat>` and `match webreputation <level>` are all
+  // accepted and stored verbatim.
   function aclEl(id) { return document.getElementById("acl-" + id); }
   function aclReset() {
     aclEl("utf8").checked = true;
