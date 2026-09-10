@@ -7,7 +7,6 @@ Nothing is written to disk and nothing persists a restart. A different browser
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import re
 from urllib.parse import quote
@@ -2363,17 +2362,11 @@ async def config_cfg_targets(flavor: str, request: Request) -> JSONResponse:
                                 "name": _pick(a, "name", "hostname", default=s),
                                 "group": _pick(a, "group_name", "group", default="-"),
                                 "status": "Up" if _classic_up(_pick(a, "status", "state", default="")) else "Down"})
-        for ep, ty in (("switches", "switch"), ("gateways", "gateway")):
-            rows, _t, _s = await _fetch_all(cx, f"https://{host}/monitoring/v1/{ep}", hdr,
-                                            style="offset", params={"limit": "1000"}, item_key=ep)
-            for d in rows:
-                s = _pick(d, "serial", "serial_number", default="")
-                if s:
-                    devices.append({"serial": s, "type": ty,
-                                    "name": _pick(d, "name", "hostname", default=s),
-                                    "group": _pick(d, "group_name", "group", default="-"),
-                                    "status": "Up" if _classic_up(_pick(d, "status", "state", default="")) else "Down"})
-    devices.sort(key=lambda d: (d["type"], d["name"].lower()))
+        # Switches / gateways are intentionally omitted: Central only returns a
+        # retrievable running config for template-group switches, and gateway
+        # config needs the caasapi NB-API (rarely allow-listed). Exposing them
+        # here just produces "Could not load" for almost everyone.
+    devices.sort(key=lambda d: d["name"].lower())
     return JSONResponse({"groups": groups, "devices": devices})
 
 
@@ -2389,21 +2382,11 @@ async def config_running(flavor: str, request: Request, kind: str,
     hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
     host = conn["host"]
     async with httpx.AsyncClient(timeout=60.0) as cx:
-        if kind == "group" or dtype == "ap":
-            clis, sc, msg = await _ap_cli_get(cx, host, hdr, ident)
-            if clis is None:
-                return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
-            return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
-                                 "cli": "\n".join(clis)})
-        if dtype == "switch":
-            r = await cx.get(f"https://{host}/configuration/v1/devices/{quote(ident, safe='')}/configuration", headers=hdr)
-            if r.status_code == 200:
-                body = r.json() if r.content else {}
-                txt = body if isinstance(body, str) else (body.get("configuration") or body.get("config") or json.dumps(body, indent=2))
-                return JSONResponse({"ident": ident, "kind": kind, "type": dtype, "cli": txt})
-            return _err(400, "This switch's configuration is not retrievable via API "
-                             "(only switches in a template group expose their config).")
-        return _err(400, "Gateway/controller configuration retrieval is not enabled for this tenant.")
+        clis, sc, msg = await _ap_cli_get(cx, host, hdr, ident)
+        if clis is None:
+            return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
+        return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
+                             "cli": "\n".join(clis)})
 
 
 @app.get("/api/config/{flavor}/apprf-apps")

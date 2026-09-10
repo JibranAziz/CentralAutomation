@@ -156,8 +156,8 @@ curl -sk https://<host>/healthz
 | `DELETE /api/config/{flavor}/group/{name}` | delete a group |
 | `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
 | `GET /api/config/classic/apprf-apps` | apps AppRF has classified on this tenant's traffic (`/apprf/v1/applications`) — folded into the access-rule Application suggestion list; best-effort, `{apps:[]}` on failure |
-| `GET /api/config/classic/cfg-targets` | `{groups[], devices:[{serial,name,type,group,status}]}` — picker source for the **View Configuration** card (type: `ap`/`switch`/`gateway`) |
-| `GET /api/config/classic/running` | `?kind=group\|device&ident=<name\|serial>&dtype=<ap\|switch\|gateway>` → `{ident,kind,type,cli}`. group / AP → `/configuration/v1/ap_cli/{x}` (running config, works per-serial too); switch → `/configuration/v1/devices/{serial}/configuration` (template-group switches only, else 400); gateway → 400 (not enabled on this tenant) |
+| `GET /api/config/classic/cfg-targets` | `{groups[], devices:[{serial,name,type,group,status}]}` — picker source for the **View Configuration** card. `devices` is APs only (switch/gateway config isn't retrievable for most tenants — see notes) |
+| `GET /api/config/classic/running` | `?kind=group\|device&ident=<name\|serial>` → `{ident,kind,type,cli}` via `/configuration/v1/ap_cli/{x}` (full running config; works for a group name or an AP serial) |
 | `POST /api/config/classic/ap-radio` | `{aps:[{serial,arch}], bands:{a|g|six:{channel,power}}}` — per-AP static channel/power. Instant → AP Settings v2 (2.4/5 GHz). AOS-10 → `radio-<N>-channel <ch> <pwr>` in the per-ap-settings block via `POST /configuration/v1/ap_settings_cli/{serial}` (N: 0=5, 1=2.4, 2=6 GHz; channel+power both required; `0`=back to AirMatch) |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
@@ -537,15 +537,16 @@ counterpart to the Bulk channel & power editor.
 ### View Configuration (Classic)
 
 A **"View Configuration"** Account Overview card (`[data-viewcfg]`, shown for the
-Classic flavor only) → the `#viewcfg` panel: a Scope select (AP group / Device),
-a Target select populated from `GET /api/config/classic/cfg-targets`, a **Load**
-button, a `<pre>` viewer, and a **Download** button (Blob + synthetic
+Classic flavor only) → the `#viewcfg` panel: a Scope select (AP group / Access
+point), a Target select populated from `GET /api/config/classic/cfg-targets`, a
+**Load** button, a `<pre>` viewer, and a **Download** button (Blob + synthetic
 `<a download>`, saved as `<target>.cfg`).
 
-- Group / AP → full running config from `/configuration/v1/ap_cli/{group|serial}`.
-- Switch → `/configuration/v1/devices/{serial}/configuration` (only switches in a
-  template group return a config; otherwise a friendly 400).
-- Gateway / controller → 400 (`caasapi` NB-API is not allow-listed on this tenant).
+- Both scopes resolve to `/configuration/v1/ap_cli/{group|serial}` — that one
+  endpoint returns a group's config or a single AP's full running config.
+- Switches / gateways are deliberately **not** offered: Central only returns a
+  retrievable config for template-group switches, and gateway config needs the
+  `caasapi` NB-API (rarely allow-listed) — they'd just fail for most tenants.
 - Read-only — no push path. JS: `openViewCfg` / `vcFillTargets` / `vcLoad` /
   `vcDownload`; `closeConfig` also hides `#viewcfg`.
 

@@ -1337,7 +1337,7 @@
             <label class="lbl" for="vc-kind">Scope</label>
             <select id="vc-kind">
               <option value="group">AP group</option>
-              <option value="device">Device</option>
+              <option value="device">Access point</option>
             </select>
           </div>
           <div class="field" style="flex:2">
@@ -2400,7 +2400,7 @@
       vcTargets.devices.forEach(function (d) {
         var o = document.createElement("option");
         o.value = "device|" + d.type + "|" + d.serial;
-        o.textContent = d.name + "  (" + d.type + " · " + d.serial +
+        o.textContent = d.name + "  (" + d.serial +
           (d.group && d.group !== "-" ? " · " + d.group : "") + ")";
         sel.appendChild(o);
       });
@@ -2445,7 +2445,7 @@
       }
       out.textContent = res.body.cli || "(empty)";
       vcCur = { name: ident, text: res.body.cli || "" };
-      document.getElementById("vc-out-name").textContent = ident + " — " + (kind === "group" ? "group config" : dtype + " running config");
+      document.getElementById("vc-out-name").textContent = ident + " — " + (kind === "group" ? "group config" : "running config");
       document.getElementById("vc-out-bar").hidden = false;
     }).catch(function () { out.hidden = true; vcErr("Network error."); });
   }
