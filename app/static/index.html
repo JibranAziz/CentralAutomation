@@ -307,6 +307,12 @@
   #viewcfg .field-row { display: flex; gap: 12px; align-items: flex-start; }
   #viewcfg .field-row .field { flex: 1; }
   #viewcfg .err:not([hidden]) { display: block; }
+  #grpbak .field-row { display: flex; gap: 12px; align-items: flex-start; }
+  #grpbak .field-row .field { flex: 1; }
+  #grpbak .err:not([hidden]) { display: block; }
+  #gb-restore-modal .err:not([hidden]) { display: block; }
+  #gb-rows td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line, #e5e7eb); }
+  #gb-rows td:not(:first-child) { padding-left: 10px; }
   #config-form input[type="text"], #config-form input[type="password"],
   #config-form input[type="search"], #config-form input[type="number"], #config-form select {
     width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink);
@@ -1020,6 +1026,13 @@
               </div>
               <div class="s-sub">Edit a WLAN access rule / user role and push it to AP groups</div>
             </button>
+            <button class="statcard" type="button" data-groupbackup="1" style="--c:#475569">
+              <div class="stat-top">
+                <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 3.5c3 0 5.5-.9 5.5-2S11 0 8 0 2.5.4 2.5 1.5 5 3.5 8 3.5Z" stroke="currentColor" stroke-width="1.3"/><path d="M2.5 1.5v11c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2v-11M2.5 7c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2" stroke="currentColor" stroke-width="1.3"/></svg></span>
+                <span class="s-label">Group backups</span>
+              </div>
+              <div class="s-sub">Back up, protect and restore a template group's configuration</div>
+            </button>
           </div>
         </div>
       </div>
@@ -1354,6 +1367,89 @@
           <button type="button" class="linkbtn" id="vc-download">Download</button>
         </div>
         <pre id="vc-out" hidden style="max-height:60vh;overflow:auto;background:var(--code-bg,#0d1117);color:var(--code-fg,#c9d1d9);padding:14px 16px;border-radius:8px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre;-webkit-overflow-scrolling:touch"></pre>
+      </div>
+
+      <div id="grpbak" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="grpbak-back">← Account Overview</button>
+          <span class="panel-head" style="margin:0">Group backups</span>
+        </div>
+        <div class="field-row">
+          <div class="field" style="flex:2">
+            <label class="lbl" for="gb-group">Group</label>
+            <select id="gb-group"><option value="">—</option></select>
+          </div>
+          <div class="field" style="align-self:flex-end">
+            <button type="button" class="btn ghost" id="gb-reload">Reload</button>
+          </div>
+        </div>
+        <p id="gb-hint" class="cgroup-count" style="margin:-2px 0 12px"></p>
+        <div id="gb-err" class="err" hidden style="margin-bottom:10px"></div>
+        <div id="gb-msg" class="cgroup-count" hidden style="margin-bottom:10px;color:var(--ok,#15803d)"></div>
+
+        <div id="gb-body" hidden>
+          <div class="panel-head" style="font-size:13px;margin:4px 0 8px">Existing backups</div>
+          <div style="overflow-x:auto">
+            <table id="gb-table" style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead><tr style="text-align:left;color:var(--muted)">
+                <th style="padding:6px 10px 6px 0">Name</th>
+                <th style="padding:6px 10px">Created</th>
+                <th style="padding:6px 10px">By</th>
+                <th style="padding:6px 10px">Protected</th>
+                <th style="padding:6px 0"></th>
+              </tr></thead>
+              <tbody id="gb-rows"></tbody>
+            </table>
+          </div>
+
+          <div class="panel-head" style="font-size:13px;margin:22px 0 8px">Create a backup</div>
+          <div class="field-row">
+            <div class="field" style="flex:2">
+              <label class="lbl" for="gb-new-name">Backup name <span class="req">*</span></label>
+              <input type="text" id="gb-new-name" autocomplete="off" placeholder="letters, digits, _ . -">
+            </div>
+            <div class="field" style="align-self:flex-end">
+              <label class="chk" style="margin-bottom:8px"><input type="checkbox" id="gb-new-dnd"> Protect (do not auto-delete)</label>
+            </div>
+            <div class="field" style="align-self:flex-end">
+              <button type="button" class="btn" id="gb-create">Create backup</button>
+            </div>
+          </div>
+
+          <div id="gb-log-wrap" hidden style="margin-top:18px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+              <span class="upd" id="gb-log-name"></span>
+              <button type="button" class="linkbtn" id="gb-log-download">Download</button>
+              <button type="button" class="linkbtn" id="gb-log-close">Close</button>
+            </div>
+            <pre id="gb-log" style="max-height:46vh;overflow:auto;background:var(--code-bg,#0d1117);color:var(--code-fg,#c9d1d9);padding:14px 16px;border-radius:8px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap"></pre>
+          </div>
+        </div>
+      </div>
+
+      <div id="gb-restore-modal" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div style="background:var(--bg,#fff);border-radius:10px;padding:22px;max-width:440px;width:92%">
+          <div class="panel-head" style="margin:0 0 8px">Restore configuration</div>
+          <p style="font-size:12.5px;line-height:1.5;color:var(--muted);margin:0 0 12px">
+            This overwrites <b id="gb-r-group"></b>'s entire configuration with the backup
+            <b id="gb-r-name"></b> and pushes it to every device in the group. This cannot be undone.
+            Type the group name to confirm.
+          </p>
+          <label class="lbl" for="gb-r-dev">Device type to restore</label>
+          <select id="gb-r-dev" style="width:100%;margin-bottom:12px">
+            <option value="ALL">All device types</option>
+            <option value="IAP">Access points (IAP)</option>
+            <option value="CX">Switches — AOS-CX</option>
+            <option value="ArubaSwitch">Switches — AOS-S</option>
+            <option value="MobilityController">Gateways / controllers</option>
+          </select>
+          <input type="text" id="gb-r-confirm" autocomplete="off" placeholder="group name" style="width:100%;margin-bottom:14px">
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button type="button" class="btn ghost" id="gb-r-cancel">Cancel</button>
+            <button type="button" class="btn" id="gb-r-go" style="background:var(--danger,#b91c1c)">Restore</button>
+          </div>
+          <div id="gb-r-err" class="err" hidden style="margin-top:10px"></div>
+        </div>
       </div>
 
       <!-- New Central configuration (network-config library profiles) -->
@@ -2377,6 +2473,8 @@
   function closeConfig() {
     configForm.hidden = true;
     document.getElementById("viewcfg").hidden = true;
+    document.getElementById("grpbak").hidden = true;
+    document.getElementById("gb-restore-modal").hidden = true;
     overviewInner.hidden = false;
     cfgKind = null;
   }
@@ -2452,12 +2550,165 @@
   var vcCur = null;
   function vcDownload() {
     if (!vcCur) return;
-    var blob = new Blob([vcCur.text], { type: "text/plain" });
+    blobDownload(vcCur.text, vcCur.name.replace(/[^\w.-]+/g, "_") + ".cfg");
+  }
+  function blobDownload(text, filename) {
+    var blob = new Blob([text], { type: "text/plain" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = vcCur.name.replace(/[^\w.-]+/g, "_") + ".cfg";
+    a.download = filename;
     document.body.appendChild(a); a.click();
     setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  /* ---- Group backups (Classic, template / mixed groups) ---- */
+  var gbGroup = "", gbLogCur = null, gbRestoreCur = null;
+  function gbErr(m) { var e = document.getElementById("gb-err"); e.textContent = m || ""; e.hidden = !m; }
+  function gbMsg(m) { var e = document.getElementById("gb-msg"); e.textContent = m || ""; e.hidden = !m; }
+  function openGroupBackups() {
+    if (activeFlavor !== "classic") return;
+    overviewInner.hidden = true;
+    configForm.hidden = true;
+    detailEl.hidden = true;
+    document.getElementById("viewcfg").hidden = true;
+    document.getElementById("grpbak").hidden = false;
+    gbErr(""); gbMsg("");
+    document.getElementById("gb-body").hidden = true;
+    document.getElementById("gb-log-wrap").hidden = true;
+    document.getElementById("gb-hint").textContent = "Loading groups…";
+    var sel = document.getElementById("gb-group");
+    sel.innerHTML = '<option value="">—</option>';
+    api("/api/config/classic/backup-groups").then(function (res) {
+      if (!res.ok) { document.getElementById("gb-hint").textContent = ""; gbErr((res.body && res.body.error) || "Could not load groups."); return; }
+      var gs = res.body.groups || [];
+      gs.forEach(function (g) {
+        var o = document.createElement("option"); o.value = g; o.textContent = g;
+        sel.appendChild(o);
+      });
+      document.getElementById("gb-hint").textContent = res.body.filtered
+        ? "Showing template / mixed groups only — configuration backups are not available for UI groups."
+        : "Could not determine group types — showing all groups; UI groups will report that backups aren't available.";
+      if (!gs.length) gbErr("No groups on this tenant can hold a configuration backup (need a template or mixed group).");
+    }).catch(function () { document.getElementById("gb-hint").textContent = ""; gbErr("Network error."); });
+  }
+  function gbFmtTs(t) {
+    if (!t) return "—";
+    var d = new Date(t * 1000);
+    return isNaN(d) ? "—" : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  }
+  function gbLoadList() {
+    gbGroup = document.getElementById("gb-group").value;
+    gbErr(""); gbMsg("");
+    document.getElementById("gb-log-wrap").hidden = true;
+    if (!gbGroup) { document.getElementById("gb-body").hidden = true; return; }
+    document.getElementById("gb-body").hidden = false;
+    var tb = document.getElementById("gb-rows");
+    tb.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">Loading…</td></tr>';
+    api("/api/config/classic/backups?group=" + encodeURIComponent(gbGroup)).then(function (res) {
+      if (!res.ok) { tb.innerHTML = ""; gbErr((res.body && res.body.error) || "Could not list backups."); return; }
+      var rows = res.body.backups || [];
+      if (res.body.last_restore_log) gbMsg("Last restore: " + res.body.last_restore_log);
+      if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="5" style="color:var(--muted)">' +
+          (res.body.note || "No backups yet.") + "</td></tr>";
+        return;
+      }
+      tb.innerHTML = "";
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        tr.appendChild(gbCell(r.name, true));
+        tr.appendChild(gbCell(gbFmtTs(r.timestamp)));
+        tr.appendChild(gbCell(r.created_by || "—"));
+        tr.appendChild(gbCell(r.do_not_delete ? "Protected" : "—"));
+        var act = document.createElement("td");
+        act.appendChild(gbBtn("Log", function () { gbShowLog(r.name); }));
+        act.appendChild(gbBtn(r.do_not_delete ? "Unprotect" : "Protect", function () {
+          gbProtect(r.name, !r.do_not_delete);
+        }));
+        act.appendChild(gbBtn("Restore", function () { gbOpenRestore(r.name); }, true));
+        tr.appendChild(act);
+        tb.appendChild(tr);
+      });
+    }).catch(function () { tb.innerHTML = ""; gbErr("Network error."); });
+  }
+  function gbCell(txt, mono) {
+    var td = document.createElement("td");
+    td.textContent = txt;
+    if (mono) td.style.fontFamily = "ui-monospace,Menlo,Consolas,monospace";
+    return td;
+  }
+  function gbBtn(label, fn, danger) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "linkbtn"; b.textContent = label;
+    b.style.marginRight = "12px";
+    if (danger) b.style.color = "var(--danger,#b91c1c)";
+    b.addEventListener("click", fn);
+    return b;
+  }
+  function gbShowLog(name) {
+    gbErr("");
+    var w = document.getElementById("gb-log-wrap"), pre = document.getElementById("gb-log");
+    w.hidden = false; pre.textContent = "Loading…";
+    document.getElementById("gb-log-name").textContent = gbGroup + " / " + name;
+    api("/api/config/classic/backup-log?group=" + encodeURIComponent(gbGroup) +
+        "&name=" + encodeURIComponent(name)).then(function (res) {
+      if (!res.ok) { pre.textContent = ""; w.hidden = true; gbErr((res.body && res.body.error) || "Could not read log."); return; }
+      pre.textContent = (res.body.status ? "[" + res.body.status + "]\n\n" : "") + (res.body.log || "(empty)");
+      gbLogCur = { name: gbGroup + "_" + name, text: res.body.log || "" };
+    }).catch(function () { pre.textContent = ""; w.hidden = true; gbErr("Network error."); });
+  }
+  function gbProtect(name, dnd) {
+    gbErr(""); gbMsg("");
+    api("/api/config/classic/backup-protect", {
+      method: "PATCH", body: JSON.stringify({ group: gbGroup, names: [name], do_not_delete: dnd }),
+    }).then(function (res) {
+      if (!res.ok) { gbErr((res.body && res.body.error) || "Could not update protection."); return; }
+      gbMsg(name + (dnd ? " is now protected." : " is no longer protected."));
+      gbLoadList();
+    }).catch(function () { gbErr("Network error."); });
+  }
+  function gbCreate() {
+    gbErr(""); gbMsg("");
+    var name = document.getElementById("gb-new-name").value.trim();
+    if (!name) { gbErr("Enter a backup name."); return; }
+    var btn = document.getElementById("gb-create");
+    btn.disabled = true; btn.textContent = "Creating…";
+    api("/api/config/classic/backup", {
+      method: "POST",
+      body: JSON.stringify({ group: gbGroup, name: name, do_not_delete: document.getElementById("gb-new-dnd").checked }),
+    }).then(function (res) {
+      btn.disabled = false; btn.textContent = "Create backup";
+      if (!res.ok) { gbErr((res.body && res.body.error) || "Backup failed."); return; }
+      document.getElementById("gb-new-name").value = "";
+      document.getElementById("gb-new-dnd").checked = false;
+      gbMsg("Backup “" + name + "” created.");
+      gbLoadList();
+    }).catch(function () { btn.disabled = false; btn.textContent = "Create backup"; gbErr("Network error."); });
+  }
+  function gbOpenRestore(name) {
+    gbRestoreCur = name;
+    document.getElementById("gb-r-group").textContent = gbGroup;
+    document.getElementById("gb-r-name").textContent = name;
+    document.getElementById("gb-r-confirm").value = "";
+    document.getElementById("gb-r-err").hidden = true;
+    document.getElementById("gb-restore-modal").hidden = false;
+  }
+  function gbDoRestore() {
+    var conf = document.getElementById("gb-r-confirm").value.trim();
+    var e = document.getElementById("gb-r-err");
+    if (conf !== gbGroup) { e.textContent = "Type the group name exactly to confirm."; e.hidden = false; return; }
+    var btn = document.getElementById("gb-r-go");
+    btn.disabled = true; btn.textContent = "Restoring…";
+    api("/api/config/classic/backup-restore", {
+      method: "POST", body: JSON.stringify({ group: gbGroup, name: gbRestoreCur, confirm: conf,
+        device_type: document.getElementById("gb-r-dev").value }),
+    }).then(function (res) {
+      btn.disabled = false; btn.textContent = "Restore";
+      if (!res.ok) { e.textContent = (res.body && res.body.error) || "Restore failed."; e.hidden = false; return; }
+      document.getElementById("gb-restore-modal").hidden = true;
+      gbMsg("Restore of “" + gbRestoreCur + "” started — check the group's config status in Central.");
+      gbLoadList();
+    }).catch(function () { btn.disabled = false; btn.textContent = "Restore"; e.textContent = "Network error."; e.hidden = false; });
   }
   function renderGroupList(filter) {
     var f = (filter || "").toLowerCase();
@@ -2490,6 +2741,22 @@
   });
   document.getElementById("vc-load").addEventListener("click", vcLoad);
   document.getElementById("vc-download").addEventListener("click", vcDownload);
+  var gbCardBtn = document.querySelector("[data-groupbackup]");
+  if (gbCardBtn) gbCardBtn.addEventListener("click", openGroupBackups);
+  document.getElementById("grpbak-back").addEventListener("click", closeConfig);
+  document.getElementById("gb-group").addEventListener("change", gbLoadList);
+  document.getElementById("gb-reload").addEventListener("click", gbLoadList);
+  document.getElementById("gb-create").addEventListener("click", gbCreate);
+  document.getElementById("gb-log-close").addEventListener("click", function () {
+    document.getElementById("gb-log-wrap").hidden = true;
+  });
+  document.getElementById("gb-log-download").addEventListener("click", function () {
+    if (gbLogCur) blobDownload(gbLogCur.text, gbLogCur.name.replace(/[^\w.-]+/g, "_") + "_backup.log");
+  });
+  document.getElementById("gb-r-cancel").addEventListener("click", function () {
+    document.getElementById("gb-restore-modal").hidden = true;
+  });
+  document.getElementById("gb-r-go").addEventListener("click", gbDoRestore);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
   document.getElementById("cf-load-group").addEventListener("change", function () {
     loadNamesForGroup(this.value);

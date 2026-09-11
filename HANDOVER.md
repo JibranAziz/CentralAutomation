@@ -159,6 +159,12 @@ curl -sk https://<host>/healthz
 | `GET /api/config/classic/cfg-targets` | `{groups[], devices:[{serial,name,type,group,status}]}` — picker source for the **View Configuration** card. `devices` is APs only (switch/gateway config isn't retrievable for most tenants — see notes) |
 | `GET /api/config/classic/running` | `?kind=group\|device&ident=<name\|serial>` → `{ident,kind,type,cli}` via `/configuration/v1/ap_cli/{x}` (full running config; works for a group name or an AP serial) |
 | `POST /api/config/classic/ap-radio` | `{aps:[{serial,arch}], bands:{a|g|six:{channel,power}}}` — per-AP static channel/power. Instant → AP Settings v2 (2.4/5 GHz). AOS-10 → `radio-<N>-channel <ch> <pwr>` in the per-ap-settings block via `POST /configuration/v1/ap_settings_cli/{serial}` (N: 0=5, 1=2.4, 2=6 GHz; channel+power both required; `0`=back to AirMatch) |
+| `GET /api/config/classic/backup-groups` | `{groups[], filtered}` — groups eligible for a config backup (template/mixed only, via `/configuration/v2/groups/template_info`; `filtered:false` ⇒ couldn't determine, all groups returned) |
+| `GET /api/config/classic/backups` | `?group=` → `{group, backups:[{name,created_by,do_not_delete,timestamp}], last_restore_log, note?}` (`/configuration/v1/groups/{g}/snapshots`; 400 "UI Group" ⇒ empty list + note) |
+| `GET /api/config/classic/backup-log` | `?group=&name=` → `{log, status}` (`…/snapshots/{n}/backup_log` + `…/backup_status`) |
+| `POST /api/config/classic/backup` | `{group, name, do_not_delete}` → `POST /configuration/v1/groups/snapshot/{group}` (template/mixed groups only; name `[A-Za-z0-9_.-]{1,64}`) |
+| `PATCH /api/config/classic/backup-protect` | `{group, names[], do_not_delete}` → one `PATCH /configuration/v1/groups/{g}/snapshots {name, do_not_delete}` per name |
+| `POST /api/config/classic/backup-restore` | `{group, name, confirm, device_type}` — `confirm` must equal `group`; `device_type` ∈ IAP/CX/ArubaSwitch/MobilityController/ALL → `POST …/snapshots/{n}/restore?device_type=` |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
 | `GET /api/list/{flavor}/ap-radios` | Per-AP current channel / TX power / utilisation per band (2.4 / 5 / 6 GHz) — read-only |
@@ -549,6 +555,26 @@ point), a Target select populated from `GET /api/config/classic/cfg-targets`, a
   `caasapi` NB-API (rarely allow-listed) — they'd just fail for most tenants.
 - Read-only — no push path. JS: `openViewCfg` / `vcFillTargets` / `vcLoad` /
   `vcDownload`; `closeConfig` also hides `#viewcfg`.
+
+### Group backups (Classic)
+
+A **"Group backups"** card in the Configuration section → `#grpbak` panel. Aruba
+Central's config backup/restore API only works for **template or mixed groups**
+(UI/Instant groups return 400 "Creation of configuration backup is allowed only
+for template or mixed group"), so the group picker is filtered to those.
+
+- List: name / created / by / protected, with per-row **Log**, **Protect /
+  Unprotect**, **Restore**.
+- Create: name + "Protect (do not auto-delete)" checkbox.
+- Log viewer with **Download** (`.log`).
+- **Restore** opens `#gb-restore-modal`: a device-type select (IAP / CX /
+  ArubaSwitch / MobilityController / ALL) + a type-the-group-name confirm; the
+  backend also rejects the call unless `confirm == group`. Restore overwrites the
+  whole group config and pushes to every device — irreversible.
+- Endpoint shapes match Aruba's own `pycentral` boilerplate (`snapshot/{group}`
+  create, `PATCH .../snapshots {name, do_not_delete}`, `restore?device_type=`).
+- JS: `openGroupBackups` / `gbLoadList` / `gbShowLog` / `gbProtect` / `gbCreate` /
+  `gbOpenRestore` / `gbDoRestore`; `_classic_template_groups` does the filter.
 
 ## Topology view (frontend)
 

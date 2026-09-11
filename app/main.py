@@ -2389,6 +2389,196 @@ async def config_running(flavor: str, request: Request, kind: str,
                              "cli": "\n".join(clis)})
 
 
+# --------------------------------------------------------------------------- #
+# Group configuration backups (Classic) — template / mixed groups only
+# --------------------------------------------------------------------------- #
+
+async def _classic_template_groups(cx: httpx.AsyncClient, host: str,
+                                   hdr: dict[str, str], names: list[str]) -> dict[str, bool]:
+    """`{group: is_template_or_mixed}` from
+    `/configuration/v2/groups/template_info` (batched — the endpoint 400s on
+    long group lists). Empty dict => unavailable (caller should not filter)."""
+    out: dict[str, bool] = {}
+    for i in range(0, len(names), 15):
+        chunk = names[i:i + 15]
+        try:
+            r = await cx.get(f"https://{host}/configuration/v2/groups/template_info",
+                             headers=hdr, params={"groups": ",".join(chunk)})
+            if r.status_code == 200 and r.content:
+                for x in (r.json() or {}).get("data", []):
+                    td = x.get("template_details") or {}
+                    out[x.get("group", "")] = bool(td.get("Wired") or td.get("Wireless"))
+        except Exception:
+            continue
+    return out
+
+
+@app.get("/api/config/{flavor}/backup-groups")
+async def config_backup_groups(flavor: str, request: Request) -> JSONResponse:
+    """Groups that can hold a configuration backup (template or mixed)."""
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+        names, _sc = await _classic_group_names(cx, conn["host"], hdr)
+        names = sorted(names or [], key=str.lower)
+        flags = await _classic_template_groups(cx, conn["host"], hdr, names)
+    if flags:
+        groups = [g for g in names if flags.get(g)]
+        return JSONResponse({"groups": groups, "filtered": True})
+    return JSONResponse({"groups": names, "filtered": False})
+
+
+@app.get("/api/config/{flavor}/backups")
+async def config_backups_list(flavor: str, request: Request, group: str) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    g = quote(group, safe="")
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        r = await cx.get(f"https://{conn['host']}/configuration/v1/groups/{g}/snapshots", headers=hdr)
+        lr = await cx.get(f"https://{conn['host']}/configuration/v1/groups/{g}/last_restore_log", headers=hdr)
+    last_restore = (lr.json().get("last_restore_log") if lr.status_code == 200 and lr.content else None)
+    if r.status_code == 200 and r.content:
+        rows = (r.json() or {}).get("data", []) or []
+        backups = [{
+            "name": x.get("name", ""),
+            "created_by": x.get("created_by", ""),
+            "do_not_delete": bool(x.get("do_not_delete")),
+            "timestamp": x.get("backup_start_timestamp"),
+        } for x in rows]
+        return JSONResponse({"group": group, "backups": backups, "last_restore_log": last_restore})
+    # 400 "No backups available for UI Group X" is the empty case, not an error
+    desc = ""
+    try:
+        desc = (r.json() or {}).get("description", "")
+    except Exception:
+        pass
+    if r.status_code == 400:
+        return JSONResponse({"group": group, "backups": [], "last_restore_log": last_restore,
+                             "note": desc or "No backups for this group."})
+    return _err(502, f"Could not list backups for {group} ({r.status_code}). {desc}")
+
+
+@app.get("/api/config/{flavor}/backup-log")
+async def config_backup_log(flavor: str, request: Request, group: str, name: str) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
+    g, n = quote(group, safe=""), quote(name, safe="")
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        r = await cx.get(f"https://{conn['host']}/configuration/v1/groups/{g}/snapshots/{n}/backup_log", headers=hdr)
+        s = await cx.get(f"https://{conn['host']}/configuration/v1/groups/{g}/snapshots/{n}/backup_status", headers=hdr)
+    if r.status_code != 200:
+        return _err(502, f"Could not read backup log ({r.status_code}).")
+    status = (s.json().get("backup_status") if s.status_code == 200 and s.content else None)
+    return JSONResponse({"group": group, "name": name,
+                         "log": (r.json() or {}).get("backup_log", ""), "status": status})
+
+
+@app.post("/api/config/{flavor}/backup")
+async def config_backup_create(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    b = await request.json()
+    group = (b.get("group") or "").strip()
+    name = (b.get("name") or "").strip()
+    if not group or not name:
+        return _err(400, "Group and backup name are required.")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name):
+        return _err(400, "Backup name: letters, digits, _ . - only (max 64).")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    body = {"name": name, "do_not_delete": bool(b.get("do_not_delete"))}
+    async with httpx.AsyncClient(timeout=60.0) as cx:
+        r = await cx.post(f"https://{conn['host']}/configuration/v1/groups/snapshot/{quote(group, safe='')}",
+                          headers=hdr, json=body)
+    if r.status_code in (200, 201):
+        return JSONResponse({"ok": True, "group": group, "name": name})
+    desc = ""
+    try:
+        desc = (r.json() or {}).get("description") or (r.json() or {}).get("detail") or ""
+    except Exception:
+        desc = (r.text or "")[:300]
+    return _err(400 if r.status_code == 400 else 502,
+                desc or f"Backup failed ({r.status_code}).")
+
+
+@app.patch("/api/config/{flavor}/backup-protect")
+async def config_backup_protect(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    b = await request.json()
+    group = (b.get("group") or "").strip()
+    names = [str(x) for x in (b.get("names") or []) if str(x).strip()]
+    if not group or not names:
+        return _err(400, "Group and at least one backup name are required.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    dnd = bool(b.get("do_not_delete"))
+    url = f"https://{conn['host']}/configuration/v1/groups/{quote(group, safe='')}/snapshots"
+    async with httpx.AsyncClient(timeout=45.0) as cx:
+        for name in names:  # the endpoint takes one {name, do_not_delete} at a time
+            r = await cx.patch(url, headers=hdr, json={"name": name, "do_not_delete": dnd})
+            if r.status_code not in (200, 201, 204):
+                desc = ""
+                try:
+                    desc = (r.json() or {}).get("description") or (r.json() or {}).get("detail") or ""
+                except Exception:
+                    desc = (r.text or "")[:300]
+                return _err(502, desc or f"Could not update protection for {name} ({r.status_code}).")
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/config/{flavor}/backup-restore")
+async def config_backup_restore(flavor: str, request: Request) -> JSONResponse:
+    conn, err = _dash_conn(request, flavor)
+    if err:
+        return err
+    if flavor != "classic":
+        return _err(400, "Configuration backups are Classic Central only.")
+    b = await request.json()
+    group = (b.get("group") or "").strip()
+    name = (b.get("name") or "").strip()
+    if not group or not name:
+        return _err(400, "Group and backup name are required.")
+    if b.get("confirm") != group:
+        return _err(400, "Restore not confirmed.")
+    dev = (b.get("device_type") or "ALL").strip()
+    if dev not in ("IAP", "CX", "ArubaSwitch", "MobilityController", "ALL"):
+        return _err(400, "Invalid device type.")
+    hdr = {"Authorization": f"Bearer {conn['access_token']}",
+           "Content-Type": "application/json", "Accept": "application/json"}
+    g, n = quote(group, safe=""), quote(name, safe="")
+    async with httpx.AsyncClient(timeout=90.0) as cx:
+        r = await cx.post(f"https://{conn['host']}/configuration/v1/groups/{g}/snapshots/{n}/restore",
+                          headers=hdr, params={"device_type": dev})
+    if r.status_code in (200, 201, 202):
+        return JSONResponse({"ok": True, "group": group, "name": name})
+    desc = ""
+    try:
+        desc = (r.json() or {}).get("description") or (r.json() or {}).get("detail") or ""
+    except Exception:
+        desc = (r.text or "")[:300]
+    return _err(400 if r.status_code == 400 else 502,
+                desc or f"Restore failed ({r.status_code}).")
+
+
 @app.get("/api/config/{flavor}/apprf-apps")
 async def config_apprf_apps(flavor: str, request: Request) -> JSONResponse:
     """Applications AppRF has actually classified on this tenant's traffic —
