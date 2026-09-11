@@ -2426,6 +2426,10 @@ async def config_running(flavor: str, request: Request, kind: str,
         if kind == "group" or dtype == "ap":
             clis, sc, msg = await _ap_cli_get(cx, host, hdr, ident)
             if clis is None:
+                if sc == 500:
+                    return _err(400, f"“{ident}” has no AP configuration to show — it's a "
+                                     "switch/gateway-only group. Pick Device scope and select "
+                                     "a specific switch or gateway instead.")
                 return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
             return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
                                  "cli": "\n".join(clis)})
