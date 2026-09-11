@@ -2523,7 +2523,7 @@
         vcTargets.devices.filter(function (d) { return d.type === "switch"; }).length + " switch, " +
         vcTargets.devices.filter(function (d) { return d.type === "gateway"; }).length + " gateway) — scroll the list for all three groups. " +
         "AOS-CX switches only return a config if they're in a template group; gateways can take a few seconds to fetch."
-      : "";
+      : "AP groups only ever show AP configuration — switches and gateways are configured per-device, so pick Device scope for those.";
   }
   function openViewCfg() {
     if (activeFlavor !== "classic") return;
