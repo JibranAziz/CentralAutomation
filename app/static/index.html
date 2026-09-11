@@ -1350,7 +1350,7 @@
             <label class="lbl" for="vc-kind">Scope</label>
             <select id="vc-kind">
               <option value="group">AP group</option>
-              <option value="device">Access point</option>
+              <option value="device">Device</option>
             </select>
           </div>
           <div class="field" style="flex:2">
@@ -1361,6 +1361,7 @@
             <button type="button" class="btn" id="vc-load">Load</button>
           </div>
         </div>
+        <p id="vc-hint" class="cgroup-count" style="margin:-2px 0 12px"></p>
         <div id="vc-err" class="err" hidden style="margin-bottom:10px"></div>
         <div id="vc-out-bar" hidden style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
           <span class="upd" id="vc-out-name"></span>
@@ -2498,11 +2499,15 @@
       vcTargets.devices.forEach(function (d) {
         var o = document.createElement("option");
         o.value = "device|" + d.type + "|" + d.serial;
-        o.textContent = d.name + "  (" + d.serial +
+        var kindLabel = d.type === "ap" ? "AP" : d.type === "switch" ? (d.switch_type || "switch") : "gateway";
+        o.textContent = d.name + "  (" + kindLabel + " · " + d.serial +
           (d.group && d.group !== "-" ? " · " + d.group : "") + ")";
         sel.appendChild(o);
       });
     }
+    document.getElementById("vc-hint").textContent = kind === "device"
+      ? "AOS-CX switches only return a config if they're in a template group; gateways can take a few seconds to fetch."
+      : "";
   }
   function openViewCfg() {
     if (activeFlavor !== "classic") return;
@@ -2516,7 +2521,7 @@
     var sel = document.getElementById("vc-target");
     sel.innerHTML = '<option value="">loading…</option>';
     api("/api/config/classic/cfg-targets").then(function (res) {
-      if (!res.ok) { vcErr((res.body && res.body.detail) || "Could not load targets."); return; }
+      if (!res.ok) { vcErr((res.body && res.body.error) || "Could not load targets."); return; }
       vcTargets.groups = res.body.groups || [];
       vcTargets.devices = res.body.devices || [];
       vcFillTargets();
@@ -2536,9 +2541,10 @@
     var q = "?kind=" + encodeURIComponent(kind) + "&ident=" + encodeURIComponent(ident) +
             "&dtype=" + encodeURIComponent(dtype);
     api("/api/config/classic/running" + q).then(function (res) {
-      if (!res.ok || !res.body) {
+      if (!res.ok || !res.body || !("cli" in res.body)) {
         out.hidden = true;
-        vcErr((res.body && res.body.detail) || "Could not load configuration.");
+        vcErr((res.body && res.body.error) ||
+          (res.status === 503 ? "Still fetching — try Load again in a few seconds." : "Could not load configuration."));
         return;
       }
       out.textContent = res.body.cli || "(empty)";

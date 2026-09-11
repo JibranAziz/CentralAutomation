@@ -156,8 +156,8 @@ curl -sk https://<host>/healthz
 | `DELETE /api/config/{flavor}/group/{name}` | delete a group |
 | `GET /api/config/classic/aps` | AP roster (name/serial/model/group) for the per-AP picker |
 | `GET /api/config/classic/apprf-apps` | apps AppRF has classified on this tenant's traffic (`/apprf/v1/applications`) — folded into the access-rule Application suggestion list; best-effort, `{apps:[]}` on failure |
-| `GET /api/config/classic/cfg-targets` | `{groups[], devices:[{serial,name,type,group,status}]}` — picker source for the **View Configuration** card. `devices` is APs only (switch/gateway config isn't retrievable for most tenants — see notes) |
-| `GET /api/config/classic/running` | `?kind=group\|device&ident=<name\|serial>` → `{ident,kind,type,cli}` via `/configuration/v1/ap_cli/{x}` (full running config; works for a group name or an AP serial) |
+| `GET /api/config/classic/cfg-targets` | `{groups[], devices:[{serial,name,type,group,status,switch_type?}]}` — picker source for **View Configuration**. `devices` = APs + switches + gateways (`type`: `ap`/`switch`/`gateway`; switches also carry `switch_type`: `AOS-CX`/`AOS-S`) |
+| `GET /api/config/classic/running` | `?kind=group\|device&ident=<name\|serial>&dtype=<ap\|switch\|gateway>` → `{ident,kind,type,cli}`. group/AP → `/configuration/v1/ap_cli/{x}`. switch/gateway → `/configuration/v1/devices/{serial}/configuration`: gateways return `{_data:"<cli text>"}` (async — retried up to 3× with a 3s gap; 503 if still pending), AOS-S switches return a structured `{"/feature":{...}}` dict (pretty-printed as JSON), AOS-CX switches 404 unless in a template group (→ 400) |
 | `POST /api/config/classic/ap-radio` | `{aps:[{serial,arch}], bands:{a|g|six:{channel,power}}}` — per-AP static channel/power. Instant → AP Settings v2 (2.4/5 GHz). AOS-10 → `radio-<N>-channel <ch> <pwr>` in the per-ap-settings block via `POST /configuration/v1/ap_settings_cli/{serial}` (N: 0=5, 1=2.4, 2=6 GHz; channel+power both required; `0`=back to AirMatch) |
 | `GET /api/config/classic/backup-groups` | `{groups[], filtered}` — groups eligible for a config backup (template/mixed only, via `/configuration/v2/groups/template_info`; `filtered:false` ⇒ couldn't determine, all groups returned) |
 | `GET /api/config/classic/backups` | `?group=` → `{group, backups:[{name,created_by,do_not_delete,timestamp}], last_restore_log, note?}` (`/configuration/v1/groups/{g}/snapshots`; 400 "UI Group" ⇒ empty list + note) |
@@ -543,16 +543,24 @@ counterpart to the Bulk channel & power editor.
 ### View Configuration (Classic)
 
 A **"View Configuration"** Account Overview card (`[data-viewcfg]`, shown for the
-Classic flavor only) → the `#viewcfg` panel: a Scope select (AP group / Access
-point), a Target select populated from `GET /api/config/classic/cfg-targets`, a
-**Load** button, a `<pre>` viewer, and a **Download** button (Blob + synthetic
+Classic flavor only) → the `#viewcfg` panel: a Scope select (AP group / Device),
+a Target select populated from `GET /api/config/classic/cfg-targets`, a **Load**
+button, a `<pre>` viewer, and a **Download** button (Blob + synthetic
 `<a download>`, saved as `<target>.cfg`).
 
-- Both scopes resolve to `/configuration/v1/ap_cli/{group|serial}` — that one
-  endpoint returns a group's config or a single AP's full running config.
-- Switches / gateways are deliberately **not** offered: Central only returns a
-  retrievable config for template-group switches, and gateway config needs the
-  `caasapi` NB-API (rarely allow-listed) — they'd just fail for most tenants.
+- AP groups and APs → `/configuration/v1/ap_cli/{group|serial}` (plain CLI text).
+- Gateways / mobility controllers → `/configuration/v1/devices/{serial}/configuration`
+  (**not** `caasapi` — that NB-API is separately gated and mostly unavailable;
+  this device endpoint isn't). The first call can just kick off an async fetch
+  and return a plain status string instead of `{_data:...}`; `_classic_device_config_raw`
+  retries up to 3× with a 3s gap before surfacing 503 ("try again").
+- AOS-S switches → same endpoint, but returns a structured
+  `{"/feature-name": {...}, ...}` dict (no `_data` key) — pretty-printed as JSON
+  since there's no CLI text form.
+- AOS-CX switches → 404 on that endpoint unless the switch is in a **template
+  group** (then `variablised_template` is the real path — untested live, no
+  template-group CX switch on hand); the picker shows them but Load returns a
+  clear "needs a template group" message rather than a raw 404.
 - Read-only — no push path. JS: `openViewCfg` / `vcFillTargets` / `vcLoad` /
   `vcDownload`; `closeConfig` also hides `#viewcfg`.
 

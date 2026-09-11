@@ -7,6 +7,7 @@ Nothing is written to disk and nothing persists a restart. A different browser
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from urllib.parse import quote
@@ -2362,12 +2363,52 @@ async def config_cfg_targets(flavor: str, request: Request) -> JSONResponse:
                                 "name": _pick(a, "name", "hostname", default=s),
                                 "group": _pick(a, "group_name", "group", default="-"),
                                 "status": "Up" if _classic_up(_pick(a, "status", "state", default="")) else "Down"})
-        # Switches / gateways are intentionally omitted: Central only returns a
-        # retrievable running config for template-group switches, and gateway
-        # config needs the caasapi NB-API (rarely allow-listed). Exposing them
-        # here just produces "Could not load" for almost everyone.
-    devices.sort(key=lambda d: d["name"].lower())
+        sws, _t, _s = await _fetch_all(cx, f"https://{host}/monitoring/v1/switches", hdr,
+                                       style="offset", params={"limit": "1000"}, item_key="switches")
+        for d in sws:
+            s = _pick(d, "serial", "serial_number", default="")
+            if s:
+                devices.append({"serial": s, "type": "switch",
+                                "switch_type": _pick(d, "switch_type", default=""),
+                                "name": _pick(d, "name", "hostname", default=s),
+                                "group": _pick(d, "group_name", "group", default="-"),
+                                "status": "Up" if _classic_up(_pick(d, "status", "state", default="")) else "Down"})
+        gws, _t, _s = await _fetch_all(cx, f"https://{host}/monitoring/v1/gateways", hdr,
+                                       style="offset", params={"limit": "1000"}, item_key="gateways")
+        for d in gws:
+            s = _pick(d, "serial", "serial_number", default="")
+            if s:
+                devices.append({"serial": s, "type": "gateway",
+                                "name": _pick(d, "name", "hostname", default=s),
+                                "group": _pick(d, "group_name", "group", default="-"),
+                                "status": "Up" if _classic_up(_pick(d, "status", "state", default="")) else "Down"})
+    devices.sort(key=lambda d: (d["type"], d["name"].lower()))
     return JSONResponse({"groups": groups, "devices": devices})
+
+
+async def _classic_device_config_raw(cx: httpx.AsyncClient, host: str, hdr: dict[str, str],
+                                     serial: str, tries: int = 3, delay: float = 3.0):
+    """`GET /configuration/v1/devices/{serial}/configuration` — works for
+    gateways/mobility controllers (returns `{"_data": "<cli text>"}`, async: the
+    first call may just kick off the fetch and return a plain status string) and
+    AOS-S switches (returns a structured `{"/feature": {...}, ...}` dict, no
+    `_data` key). AOS-CX switches 404 here unless they're in a template group
+    (use `variablised_template` instead, also template-group only).
+    Returns (text_or_dict, status) — status: 200 ok, 404 not retrievable,
+    202 still fetching (retry), other = upstream error code."""
+    url = f"https://{host}/configuration/v1/devices/{quote(serial, safe='')}/configuration"
+    for i in range(tries):
+        r = await cx.get(url, headers=hdr)
+        if r.status_code == 404:
+            return None, 404
+        if r.status_code != 200:
+            return None, r.status_code
+        body = r.json() if r.content else None
+        if isinstance(body, dict):
+            return (body.get("_data") if "_data" in body else body), 200
+        if i < tries - 1:
+            await asyncio.sleep(delay)
+    return None, 202
 
 
 @app.get("/api/config/{flavor}/running")
@@ -2382,11 +2423,22 @@ async def config_running(flavor: str, request: Request, kind: str,
     hdr = {"Authorization": f"Bearer {conn['access_token']}", "Accept": "application/json"}
     host = conn["host"]
     async with httpx.AsyncClient(timeout=60.0) as cx:
-        clis, sc, msg = await _ap_cli_get(cx, host, hdr, ident)
-        if clis is None:
-            return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
-        return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
-                             "cli": "\n".join(clis)})
+        if kind == "group" or dtype == "ap":
+            clis, sc, msg = await _ap_cli_get(cx, host, hdr, ident)
+            if clis is None:
+                return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
+            return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
+                                 "cli": "\n".join(clis)})
+        data, sc = await _classic_device_config_raw(cx, host, hdr, ident)
+        if sc == 404:
+            return _err(400, "This device's configuration is not retrievable via API "
+                             "(AOS-CX switches need to be in a template group).")
+        if sc == 202:
+            return _err(503, f"Configuration fetch for {ident} is still in progress — try again in a few seconds.")
+        if data is None:
+            return _err(502, f"Could not read configuration for {ident} ({sc}).")
+        txt = data if isinstance(data, str) else json.dumps(data, indent=2, sort_keys=True)
+        return JSONResponse({"ident": ident, "kind": kind, "type": dtype, "cli": txt})
 
 
 # --------------------------------------------------------------------------- #
