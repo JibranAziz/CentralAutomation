@@ -2496,15 +2496,17 @@
         sel.appendChild(o);
       });
     } else {
-      var groups = { ap: "Access points", switch: "Switches", gateway: "Gateways" };
+      var groupOrder = ["ap", "switch", "gateway"];
+      var groupLabels = { ap: "Access points", switch: "Switches", gateway: "Gateways" };
       var ogs = {};
+      groupOrder.forEach(function (t) {
+        var og = document.createElement("optgroup");
+        og.label = groupLabels[t];
+        ogs[t] = og;
+      });
       vcTargets.devices.forEach(function (d) {
         var og = ogs[d.type];
-        if (!og) {
-          og = ogs[d.type] = document.createElement("optgroup");
-          og.label = groups[d.type] || d.type;
-          sel.appendChild(og);
-        }
+        if (!og) { og = ogs[d.type] = document.createElement("optgroup"); og.label = d.type; }
         var o = document.createElement("option");
         o.value = "device|" + d.type + "|" + d.serial;
         var kindLabel = d.type === "switch" ? (d.switch_type || "switch") : "";
@@ -2512,9 +2514,15 @@
           (d.group && d.group !== "-" ? " · " + d.group : "") + ")";
         og.appendChild(o);
       });
+      groupOrder.concat(Object.keys(ogs).filter(function (t) { return groupOrder.indexOf(t) === -1; }))
+        .forEach(function (t) { if (ogs[t] && ogs[t].children.length) sel.appendChild(ogs[t]); });
     }
     document.getElementById("vc-hint").textContent = kind === "device"
-      ? "AOS-CX switches only return a config if they're in a template group; gateways can take a few seconds to fetch."
+      ? vcTargets.devices.length + " devices total (" +
+        vcTargets.devices.filter(function (d) { return d.type === "ap"; }).length + " AP, " +
+        vcTargets.devices.filter(function (d) { return d.type === "switch"; }).length + " switch, " +
+        vcTargets.devices.filter(function (d) { return d.type === "gateway"; }).length + " gateway) — scroll the list for all three groups. " +
+        "AOS-CX switches only return a config if they're in a template group; gateways can take a few seconds to fetch."
       : "";
   }
   function openViewCfg() {
