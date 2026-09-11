@@ -2496,13 +2496,21 @@
         sel.appendChild(o);
       });
     } else {
+      var groups = { ap: "Access points", switch: "Switches", gateway: "Gateways" };
+      var ogs = {};
       vcTargets.devices.forEach(function (d) {
+        var og = ogs[d.type];
+        if (!og) {
+          og = ogs[d.type] = document.createElement("optgroup");
+          og.label = groups[d.type] || d.type;
+          sel.appendChild(og);
+        }
         var o = document.createElement("option");
         o.value = "device|" + d.type + "|" + d.serial;
-        var kindLabel = d.type === "ap" ? "AP" : d.type === "switch" ? (d.switch_type || "switch") : "gateway";
-        o.textContent = d.name + "  (" + kindLabel + " · " + d.serial +
+        var kindLabel = d.type === "switch" ? (d.switch_type || "switch") : "";
+        o.textContent = d.name + "  (" + d.serial + (kindLabel ? " · " + kindLabel : "") +
           (d.group && d.group !== "-" ? " · " + d.group : "") + ")";
-        sel.appendChild(o);
+        og.appendChild(o);
       });
     }
     document.getElementById("vc-hint").textContent = kind === "device"
