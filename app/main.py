@@ -2395,20 +2395,26 @@ async def _classic_device_config_raw(cx: httpx.AsyncClient, host: str, hdr: dict
     `_data` key). AOS-CX switches 404 here unless they're in a template group
     (use `variablised_template` instead, also template-group only).
     Returns (text_or_dict, status) — status: 200 ok, 404 not retrievable,
-    202 still fetching (retry), other = upstream error code."""
+    202 still fetching (retry), other = upstream error code. Third element is
+    the upstream error description, if any (for surfacing to the user)."""
     url = f"https://{host}/configuration/v1/devices/{quote(serial, safe='')}/configuration"
     for i in range(tries):
         r = await cx.get(url, headers=hdr)
         if r.status_code == 404:
-            return None, 404
+            desc = ""
+            try:
+                desc = (r.json() or {}).get("description", "")
+            except Exception:
+                pass
+            return None, 404, desc
         if r.status_code != 200:
-            return None, r.status_code
+            return None, r.status_code, ""
         body = r.json() if r.content else None
         if isinstance(body, dict):
-            return (body.get("_data") if "_data" in body else body), 200
+            return (body.get("_data") if "_data" in body else body), 200, ""
         if i < tries - 1:
             await asyncio.sleep(delay)
-    return None, 202
+    return None, 202, ""
 
 
 @app.get("/api/config/{flavor}/running")
@@ -2433,10 +2439,16 @@ async def config_running(flavor: str, request: Request, kind: str,
                 return _err(502, f"Could not read configuration for {ident} ({sc}). {msg}")
             return JSONResponse({"ident": ident, "kind": kind, "type": dtype or "group",
                                  "cli": "\n".join(clis)})
-        data, sc = await _classic_device_config_raw(cx, host, hdr, ident)
+        data, sc, desc = await _classic_device_config_raw(cx, host, hdr, ident)
         if sc == 404:
-            return _err(400, "This device's configuration is not retrievable via API "
-                             "(AOS-CX switches need to be in a template group).")
+            if dtype == "switch":
+                hint = "AOS-CX switches only return a config via this API if they're in a template group."
+            elif dtype == "gateway":
+                hint = ("Central couldn't fetch this gateway's live config — it needs to be "
+                        "reachable/up, and this can also happen right after onboarding.")
+            else:
+                hint = "This device's configuration is not retrievable via API."
+            return _err(400, hint + (f" (Central: {desc})" if desc else ""))
         if sc == 202:
             return _err(503, f"Configuration fetch for {ident} is still in progress — try again in a few seconds.")
         if data is None:

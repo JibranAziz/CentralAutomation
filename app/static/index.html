@@ -2536,12 +2536,15 @@
     document.getElementById("vc-out-bar").hidden = true;
     var sel = document.getElementById("vc-target");
     sel.innerHTML = '<option value="">loading…</option>';
+    sel.disabled = true;  // keep it closed until fully populated — an open native
+                          // <select> won't refresh live, which looked like "missing" items
     api("/api/config/classic/cfg-targets").then(function (res) {
+      sel.disabled = false;
       if (!res.ok) { vcErr((res.body && res.body.error) || "Could not load targets."); return; }
       vcTargets.groups = res.body.groups || [];
       vcTargets.devices = res.body.devices || [];
       vcFillTargets();
-    }).catch(function () { vcErr("Network error loading targets."); });
+    }).catch(function () { sel.disabled = false; vcErr("Network error loading targets."); });
   }
   function vcLoad() {
     var v = document.getElementById("vc-target").value;
