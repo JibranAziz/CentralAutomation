@@ -257,7 +257,7 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
     out: dict[str, Optional[int]] = {
         "clients": None, "accessPoints": None, "switches": None,
         "gateways": None, "sites": None, "subscriptions": None,
-        "apGroups": None, "ssids": None, "rfProfiles": None,
+        "apGroups": None, "ssids": None, "rfProfiles": None, "inventory": None,
     }
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
@@ -278,6 +278,9 @@ async def _new_central_overview(host: str, token: str) -> dict[str, Optional[int
         out["ssids"] = ssid_total
         if dev_totals:
             out.update(dev_totals)
+        dev_parts = [out["accessPoints"], out["switches"], out["gateways"]]
+        if any(v is not None for v in dev_parts):
+            out["inventory"] = sum(v or 0 for v in dev_parts)
     except Exception:
         pass
     try:
@@ -748,6 +751,21 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
                     continue
                 row = _norm_device(x)
                 row["clients"] = by_serial.get(row["serial"])
+                rows.append(row)
+        elif entity == "inventory":
+            raw, total, sc = await _fetch_all(
+                client, f"https://{host}/network-monitoring/v1/devices", headers, style="cursor")
+            if sc != 200 and not raw:
+                return None, 0
+            by_serial = await _client_counts_by_serial(client, host, headers)
+            labels = {"ap": "Access Point", "switch": "Switch", "gateway": "Gateway"}
+            rows = []
+            for x in raw:
+                cat = _categorize(x.get("deviceType", ""))
+                row = _norm_device(x)
+                row["type"] = labels.get(cat, x.get("deviceType") or "—")
+                row["clients"] = by_serial.get(row["serial"])
+                row["group"] = x.get("deviceGroupName") or x.get("groupName") or "—"
                 rows.append(row)
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
@@ -1275,6 +1293,7 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         "clients": None, "accessPoints": None, "switches": None,
         "gateways": None, "sites": None, "subscriptions": None,
         "apGroups": None, "ssids": None, "rfProfiles": None, "accessRules": None,
+        "inventory": None,
     }
     probes = {
         "accessPoints": "/monitoring/v2/aps",
@@ -1314,6 +1333,9 @@ async def _classic_central_overview(host: str, token: str) -> dict[str, Optional
         cw, cd = results[-3], results[-2]
         if cw is not None or cd is not None:
             out["clients"] = (cw or 0) + (cd or 0)
+        dev_parts = [out["accessPoints"], out["switches"], out["gateways"]]
+        if any(v is not None for v in dev_parts):
+            out["inventory"] = sum(v or 0 for v in dev_parts)
         out["apGroups"] = results[-1]
     except Exception:
         pass
@@ -1447,6 +1469,23 @@ async def _classic_central_list(host: str, token: str, entity: str
                 if row["clients"] is None:
                     row["clients"] = counts.get(row["serial"])
                 rows.append(row)
+        elif entity == "inventory":
+            rows = []
+            seen = False
+            labels = {"access-points": "Access Point", "switches": "Switch", "gateways": "Gateway"}
+            for cat, (path, key) in CLASSIC_SOURCES.items():
+                raw, _t, sc = await _fetch_all(
+                    client, f"https://{host}{path}", headers, style="offset",
+                    params={"limit": "1000"}, item_key=key)
+                if sc == 200 or raw:
+                    seen = True
+                for x in raw:
+                    row = _classic_norm_device(x)
+                    row["type"] = labels[cat]
+                    row["group"] = _pick(x, "group_name", "group", default="—")
+                    rows.append(row)
+            if not seen:
+                return None, 0
         elif entity == "ssids":
             smap = await _classic_ssid_map(host, token)
             if not smap:
@@ -2141,6 +2180,7 @@ OVERVIEW_GROUPS = {
     "rfProfiles": ["rfProfiles"],
     "accessRules": ["accessRules"],
     "apRadios": ["apRadios"],
+    "inventory": ["inventory"],
 }
 
 
@@ -2172,6 +2212,9 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "apRadios":
                 r = await _new_central_ap_radios(host, token)
                 return {"apRadios": len(r) if r is not None else None}
+            if group == "inventory":
+                t = await _new_central_device_totals(cx, host, hdr)
+                return {"inventory": sum(t.values()) if t else None}
         else:  # classic
             if group == "clients":
                 tot = 0
@@ -2200,6 +2243,16 @@ async def _overview_part(flavor: str, group: str, host: str, token: str) -> dict
             if group == "apGroups":
                 names, _sc = await _classic_group_names(cx, host, hdr)
                 return {"apGroups": len(names) if names is not None else None}
+            if group == "inventory":
+                seen = False
+                tot = 0
+                for path in ("/monitoring/v2/aps", "/monitoring/v1/switches", "/monitoring/v1/gateways"):
+                    n = await _get_total(cx, f"https://{host}{path}", hdr,
+                                         {"limit": "1", "calculate_total": "true"})
+                    if n is not None:
+                        seen = True
+                        tot += n
+                return {"inventory": tot if seen else None}
     if flavor == "classic" and group == "ssids":
         smap = await _classic_ssid_map(host, token)
         return {"ssids": len(smap) if smap else None}
@@ -2233,7 +2286,7 @@ async def overview_group(flavor: str, group: str, request: Request) -> JSONRespo
 async def list_entity(flavor: str, entity: str, request: Request) -> JSONResponse:
     if entity not in {"clients", "access-points", "switches", "gateways", "sites",
                       "subscriptions", "ap-groups", "ssids", "rf-profiles", "access-rules",
-                      "ap-radios", "ap-radio-groups"}:
+                      "ap-radios", "ap-radio-groups", "inventory"}:
         return _err(404, "Unknown entity.")
     conn, err = _dash_conn(request, flavor)
     if err:

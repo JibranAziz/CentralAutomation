@@ -912,6 +912,14 @@
             <div class="s-value dim" data-stat="gateways">—</div>
             <div class="s-more">View all →</div>
           </button>
+          <button class="statcard" type="button" data-entity="inventory" style="--c:#334155">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2" width="13" height="12" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M1.5 6h13M5 2v4" stroke="currentColor" stroke-width="1.3"/></svg></span>
+              <span class="s-label">Inventory</span>
+            </div>
+            <div class="s-value dim" data-stat="inventory">—</div>
+            <div class="s-sub">Every AP, switch and gateway — model, serial, IP, site &amp; more</div>
+          </button>
           <button class="statcard" type="button" data-entity="sites" style="--c:#22c55e">
             <div class="stat-top">
               <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 14s5-4.2 5-8A5 5 0 0 0 3 6c0 3.8 5 8 5 8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8" cy="6" r="1.7" stroke="currentColor" stroke-width="1.4"/></svg></span>
@@ -1952,7 +1960,7 @@
     ["clients", "Clients"], ["devices", "Devices"], ["sites", "Sites"],
     ["subscriptions", "Subscriptions"], ["ssids", "SSIDs"], ["apGroups", "AP Groups"],
     ["rfProfiles", "RF Profiles"], ["accessRules", "Access Rules"],
-    ["apRadios", "Radio and TX Power"]
+    ["apRadios", "Radio and TX Power"], ["inventory", "Inventory"]
   ];
   var NEW_ONLY_HIDE = {};   // AP Groups + RF Profiles now available for New Central too
 
@@ -3729,6 +3737,10 @@
     "access-points": { title: "Access Points", drill: "device", idKey: "serial", cols: DEV_COLS },
     switches: { title: "Switches", drill: "device", idKey: "serial", cols: DEV_COLS },
     gateways: { title: "Gateways", drill: "device", idKey: "serial", cols: DEV_COLS },
+    inventory: { title: "Inventory", drill: "device", idKey: "serial", wide: true, cols: [
+      ["name", "Name"], ["type", "Type"], ["status", "Status"], ["model", "Model"],
+      ["serial", "Serial"], ["ip", "IPv4"], ["mac", "MAC"], ["site", "Site"],
+      ["group", "Group"], ["firmware", "Firmware"], ["clients", "Clients"]] },
     "ap-groups": { title: "AP Groups", drill: "group", idKey: "name", cols: [
       ["name", "Group"], ["aps", "APs"], ["switches", "Switches"], ["gateways", "Gateways"]],
       byFlavor: { new: { idKey: "id", cols: [

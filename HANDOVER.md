@@ -146,7 +146,7 @@ curl -sk https://<host>/healthz
 | `POST /api/webhooks/{classic\|new}` | `{enabled?, regenerate?}` — session-only webhook key toggle |
 | `GET /api/overview/{flavor}` | all card counts in one shot (legacy; UI no longer uses it) |
 | `GET /api/overview/{flavor}/{group}` | one metric group — `clients` \| `devices` \| `sites` \| `subscriptions` \| `ssids` \| `apGroups` \| `rfProfiles`; the UI fires them all in parallel and fills each card as it resolves, with a progress-chip row. `apGroups` + `rfProfiles` are Classic-only (hidden for New via `NEW_ONLY_HIDE`) |
-| `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids, rf-profiles — normalized rows |
+| `GET /api/list/{flavor}/{entity}` | `entity` ∈ clients, access-points, switches, gateways, sites, subscriptions, ap-groups, ssids, rf-profiles, access-rules, ap-radios, ap-radio-groups, **inventory** — normalized rows |
 | `GET /api/detail/{flavor}/{client\|device\|site\|group\|ssid\|rf}/{id}` | grouped detail + `meta`; may include `devices[]` (clickable member grid). `rf` = Classic RF-profile detail |
 | `GET /api/topology/{flavor}/{site-id}` | normalized `{nodes, links, isolated, roots}` for the topology diagram |
 | `GET /api/config/{flavor}/groups` | list group names (Classic) |
@@ -503,6 +503,28 @@ rule out of a group; a Delete button sends `{remove:["wlan access-rule <n>"]}`.
 IP-proto# / host-tcp+`log` / permit-all) — all preserved, list shows "Filtered"
 7 rules, detail parses every ACE. Central accepts `wlan access-rule` cleanly.
 Plus view live (53 Classic rules / 66 New policies).
+
+### Inventory (both flavors)
+
+An **"Inventory"** Account Overview card → a single wide (`wide: true`) list of
+every AP, switch and gateway with name / type / status / model / serial / IPv4
+/ MAC / site / group / firmware / client count — one flat table instead of
+three separate device lists.
+
+- Classic: iterates `CLASSIC_SOURCES` (`/monitoring/v2/aps`,
+  `/monitoring/v1/switches`, `/monitoring/v1/gateways`), reuses
+  `_classic_norm_device` for the common fields and adds `type` (readable label)
+  + `group` (`group_name`/`group` from the raw row).
+- New Central: `/network-monitoring/v1/devices` + `_categorize` to label each
+  row, `_norm_device` for the common fields, client counts from
+  `_client_counts_by_serial`; `group` = `deviceGroupName`/`groupName` if the
+  monitoring payload carries one, else "—" (New Central's device-collection
+  concept isn't always present per-device here).
+- The stat number is `accessPoints + switches + gateways` from the same totals
+  already fetched for the "Devices" progress group (`OVERVIEW_GROUPS["inventory"]`,
+  `_overview_part`'s `group == "inventory"` branches) — no extra upstream calls.
+- Row → device detail, same as Access Points / Switches / Gateways. Search +
+  CSV like every other list.
 
 ### Radio and TX Power (AP radios, both flavors)
 
