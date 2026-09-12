@@ -506,20 +506,35 @@ Plus view live (53 Classic rules / 66 New policies).
 
 ### Inventory (both flavors)
 
-An **"Inventory"** Account Overview card → a single wide (`wide: true`) list of
+An **"Inventory"** Account Overview card (plain stat tile, like every other
+count card — no description blurb) → a single wide (`wide: true`) list of
 every AP, switch and gateway with name / type / status / model / serial / IPv4
-/ MAC / site / group / firmware / client count — one flat table instead of
-three separate device lists.
+/ MAC / site / group / **license** / firmware / client count — one flat table
+instead of three separate device lists.
 
 - Classic: iterates `CLASSIC_SOURCES` (`/monitoring/v2/aps`,
   `/monitoring/v1/switches`, `/monitoring/v1/gateways`), reuses
   `_classic_norm_device` for the common fields and adds `type` (readable label)
-  + `group` (`group_name`/`group` from the raw row).
+  + `group` (`group_name`/`group` from the raw row). Client counts cross-reference
+  `CLASSIC_CLIENT_SOURCES` by `associated_device`/`associated_device_mac` — the
+  same fallback the separate Access Points/Switches/Gateways lists use, needed
+  because `_classic_norm_device`'s direct `client_count` pick is usually absent.
+- **License**: `_classic_device_licenses` — `GET
+  /platform/device_inventory/v1/devices?sku_type=<ap|switch|gateway>&limit=1000`
+  (one call per sku_type; `limit=1000` covers this tenant in one page — no
+  pagination implemented) → `{serial: {tier: tier_type, services}}`.
+  `tier_type` (e.g. `advanced`, `foundation`, `other`) is capitalized for
+  display; a device present in monitoring but absent from this list shows
+  **"Unlicensed"**; if all 3 calls fail, every row shows "—" (unknown, not
+  "Unlicensed"). Distinct from `/platform/licensing/v1/subscriptions`, which is
+  pool-level (quantity/available per SKU, no per-device assignment).
 - New Central: `/network-monitoring/v1/devices` + `_categorize` to label each
   row, `_norm_device` for the common fields, client counts from
   `_client_counts_by_serial`; `group` = `deviceGroupName`/`groupName` if the
   monitoring payload carries one, else "—" (New Central's device-collection
-  concept isn't always present per-device here).
+  concept isn't always present per-device here). **License column is always
+  "—"** — the GreenLake subscription-to-device mapping isn't wired up for New
+  Central yet.
 - The stat number is `accessPoints + switches + gateways` from the same totals
   already fetched for the "Devices" progress group (`OVERVIEW_GROUPS["inventory"]`,
   `_overview_part`'s `group == "inventory"` branches) — no extra upstream calls.

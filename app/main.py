@@ -766,6 +766,7 @@ async def _new_central_list(host: str, token: str, entity: str) -> tuple[Optiona
                 row["type"] = labels.get(cat, x.get("deviceType") or "—")
                 row["clients"] = by_serial.get(row["serial"])
                 row["group"] = x.get("deviceGroupName") or x.get("groupName") or "—"
+                row["license"] = "—"  # GreenLake subscription-to-device mapping not wired up yet
                 rows.append(row)
         elif entity == "sites":
             raw, total, sc = await _fetch_all(
@@ -1219,6 +1220,29 @@ def _classic_norm_device(d: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _classic_device_licenses(cx: httpx.AsyncClient, host: str, hdr: dict[str, str]
+                                   ) -> tuple[dict[str, dict[str, Any]], bool]:
+    """`{serial: {tier, services}}` — the Central license/subscription actually
+    assigned to each device, from `/platform/device_inventory/v1/devices`
+    (one call per `sku_type`: ap/switch/gateway). Second value is whether at
+    least one call succeeded, so callers can tell "no license" from "unknown"."""
+    out: dict[str, dict[str, Any]] = {}
+    ok = False
+    for sku in ("ap", "switch", "gateway"):
+        try:
+            r = await cx.get(f"https://{host}/platform/device_inventory/v1/devices", headers=hdr,
+                             params={"sku_type": sku, "limit": "1000"})
+            if r.status_code == 200:
+                ok = True
+                for d in (r.json() or {}).get("devices", []):
+                    s = d.get("serial")
+                    if s:
+                        out[s] = {"tier": d.get("tier_type") or "", "services": d.get("services") or []}
+        except Exception:
+            continue
+    return out, ok
+
+
 def _epoch_date(v: Any) -> str:
     try:
         n = float(v)
@@ -1473,6 +1497,16 @@ async def _classic_central_list(host: str, token: str, entity: str
             rows = []
             seen = False
             labels = {"access-points": "Access Point", "switches": "Switch", "gateways": "Gateway"}
+            counts: dict[str, int] = {}
+            for cpath, _w in CLASSIC_CLIENT_SOURCES:
+                craw, _t, _sc = await _fetch_all(
+                    client, f"https://{host}{cpath}", headers, style="offset",
+                    params={"limit": "1000"}, item_key="clients")
+                for c in craw:
+                    dev = _pick(c, "associated_device", "associated_device_mac")
+                    if dev:
+                        counts[dev] = counts.get(dev, 0) + 1
+            lic, lic_ok = await _classic_device_licenses(client, host, headers)
             for cat, (path, key) in CLASSIC_SOURCES.items():
                 raw, _t, sc = await _fetch_all(
                     client, f"https://{host}{path}", headers, style="offset",
@@ -1483,6 +1517,11 @@ async def _classic_central_list(host: str, token: str, entity: str
                     row = _classic_norm_device(x)
                     row["type"] = labels[cat]
                     row["group"] = _pick(x, "group_name", "group", default="—")
+                    if row["clients"] is None:
+                        row["clients"] = counts.get(row["serial"])
+                    ent = lic.get(row["serial"])
+                    row["license"] = (ent["tier"].capitalize() if ent and ent.get("tier")
+                                      else ("Unlicensed" if lic_ok else "—"))
                     rows.append(row)
             if not seen:
                 return None, 0
