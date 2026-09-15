@@ -10,6 +10,7 @@ __pycache__/
 *.local
 HANDOVER.local.md
 *.local.md
+data/
 
 # OS / editor
 .DS_Store

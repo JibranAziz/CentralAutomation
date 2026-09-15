@@ -313,6 +313,18 @@
   #gb-restore-modal .err:not([hidden]) { display: block; }
   #gb-rows td { padding: 7px 10px 7px 0; border-top: 1px solid var(--line, #e5e7eb); }
   #gb-rows td:not(:first-child) { padding-left: 10px; }
+  #extbak .field-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  #extbak .field-row .field { flex: 1; min-width: 160px; }
+  #extbak .err:not([hidden]) { display: block; }
+  .warnbox {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+    border-radius: 10px; padding: 12px 14px; font-size: 12.5px; line-height: 1.55;
+    color: var(--ink); margin: 4px 0 16px;
+  }
+  #eb-history > div { padding: 8px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
+  #eb-history > div:first-child { border-top: none; }
+  #eb-history ul { margin: 4px 0 0 18px; color: var(--down, #b91c1c); }
   #config-form input[type="text"], #config-form input[type="password"],
   #config-form input[type="search"], #config-form input[type="number"], #config-form select {
     width: 100%; font-family: var(--sans); font-size: 13.5px; color: var(--ink);
@@ -995,6 +1007,13 @@
             </div>
             <div class="s-sub">Inspect and download a device or group configuration</div>
           </button>
+          <button class="statcard" type="button" data-extbackup="1" style="--c:#7c3aed">
+            <div class="stat-top">
+              <span class="stat-ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5v8M8 9.5 5 6.5M8 9.5l3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 10v2.5A1.5 1.5 0 0 0 4 14h8a1.5 1.5 0 0 0 1.5-1.5V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              <span class="s-label">External Backup</span>
+            </div>
+            <div class="s-sub">SSH every device's running config to your own SCP/SFTP/FTP server, on a schedule</div>
+          </button>
         </div>
         <div class="dash-actions">
           <span class="upd" id="dash-updated"></span>
@@ -1471,6 +1490,127 @@
           </div>
           <div id="gb-r-err" class="err" hidden style="margin-top:10px"></div>
         </div>
+      </div>
+
+      <div id="extbak" hidden>
+        <div class="detail-bar">
+          <button class="linkbtn" type="button" id="extbak-back">← Account Overview</button>
+          <span class="panel-head" style="margin:0">External Backup</span>
+        </div>
+
+        <div class="warnbox">
+          <strong>Runs on this server, not in the cloud.</strong> This SSHes directly into
+          every AP, switch and gateway's management IP to pull its running config — it only
+          works if you're running Aruba Central Automation yourself (for example as a Docker
+          container) on a host that actually has network/SSH access to your devices. It will
+          not work on a shared or hosted instance that can't reach your LAN.
+        </div>
+
+        <p id="extbak-status" class="cgroup-count"></p>
+
+        <div class="panel-head" style="font-size:13px;margin:18px 0 8px">Central connection</div>
+        <div class="field-row">
+          <div class="field">
+            <label class="lbl" for="eb-flavor">Flavor</label>
+            <select id="eb-flavor">
+              <option value="classic">Classic Central</option>
+              <option value="new">New Central</option>
+            </select>
+          </div>
+        </div>
+        <div id="eb-classic-fields">
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="eb-baseurl">Base URL</label>
+              <input type="text" id="eb-baseurl" autocomplete="off" placeholder="internal-apigw.central.arubanetworks.com"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="eb-clientid">Client ID</label>
+              <input type="text" id="eb-clientid" autocomplete="off"></div>
+            <div class="field"><label class="lbl" for="eb-clientsecret">Client Secret</label>
+              <input type="password" id="eb-clientsecret" autocomplete="new-password"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="eb-refresh">Refresh Token</label>
+              <input type="password" id="eb-refresh" autocomplete="new-password"></div>
+          </div>
+        </div>
+        <div id="eb-new-fields" hidden>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="eb-cluster">Cluster URL</label>
+              <input type="text" id="eb-cluster" autocomplete="off" placeholder="apigw-prod2.central.arubanetworks.com"></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label class="lbl" for="eb-nc-clientid">Client ID</label>
+              <input type="text" id="eb-nc-clientid" autocomplete="off"></div>
+            <div class="field"><label class="lbl" for="eb-nc-clientsecret">Client Secret</label>
+              <input type="password" id="eb-nc-clientsecret" autocomplete="new-password"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+          <button type="button" class="btn ghost" id="eb-test-central">Test connection</button>
+          <span class="cgroup-count" id="eb-central-result"></span>
+        </div>
+
+        <div class="panel-head" style="font-size:13px;margin:18px 0 8px">Device SSH login</div>
+        <p class="cgroup-count" style="margin:-2px 0 8px">
+          One admin username/password, tried over SSH against every discovered AP, switch and gateway.
+        </p>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-dev-user">Username</label>
+            <input type="text" id="eb-dev-user" autocomplete="off" placeholder="admin"></div>
+          <div class="field"><label class="lbl" for="eb-dev-pass">Password</label>
+            <input type="password" id="eb-dev-pass" autocomplete="new-password"></div>
+        </div>
+
+        <div class="panel-head" style="font-size:13px;margin:18px 0 8px">Destination server</div>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-proto">Protocol</label>
+            <select id="eb-proto">
+              <option value="sftp">SFTP</option>
+              <option value="scp">SCP</option>
+              <option value="ftp">FTP</option>
+            </select></div>
+          <div class="field" style="flex:2"><label class="lbl" for="eb-host">Host</label>
+            <input type="text" id="eb-host" autocomplete="off"></div>
+          <div class="field"><label class="lbl" for="eb-port">Port</label>
+            <input type="text" id="eb-port" data-mono autocomplete="off" placeholder="22 / 21"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-dest-user">Username</label>
+            <input type="text" id="eb-dest-user" autocomplete="off"></div>
+          <div class="field"><label class="lbl" for="eb-dest-pass">Password</label>
+            <input type="password" id="eb-dest-pass" autocomplete="new-password"></div>
+          <div class="field" style="flex:2"><label class="lbl" for="eb-path">Base path</label>
+            <input type="text" id="eb-path" data-mono autocomplete="off" placeholder="/backups/aruba"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+          <button type="button" class="btn ghost" id="eb-test-dest">Test destination</button>
+          <span class="cgroup-count" id="eb-dest-result"></span>
+        </div>
+
+        <div class="panel-head" style="font-size:13px;margin:18px 0 8px">Schedule</div>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-every">Every</label>
+            <select id="eb-every">
+              <option value="6">6 hours</option>
+              <option value="12">12 hours</option>
+              <option value="24" selected>24 hours (daily)</option>
+              <option value="168">7 days (weekly)</option>
+            </select></div>
+          <div class="field"><label class="lbl" for="eb-at">At (UTC)</label>
+            <input type="text" id="eb-at" data-mono autocomplete="off" placeholder="02:00" value="02:00"></div>
+          <div class="field" style="align-self:flex-end">
+            <label class="chk" style="margin-bottom:8px"><input type="checkbox" id="eb-enabled"> Enabled</label></div>
+        </div>
+
+        <div id="eb-err" class="err" hidden style="margin:10px 0"></div>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button type="button" class="btn" id="eb-save">Save</button>
+          <button type="button" class="btn ghost" id="eb-run-now">Run now</button>
+        </div>
+
+        <div class="panel-head" style="font-size:13px;margin:22px 0 8px">History</div>
+        <div id="eb-history"></div>
       </div>
 
       <!-- New Central configuration (network-config library profiles) -->
@@ -2502,6 +2642,7 @@
     document.getElementById("viewcfg").hidden = true;
     document.getElementById("grpbak").hidden = true;
     document.getElementById("gb-restore-modal").hidden = true;
+    document.getElementById("extbak").hidden = true;
     overviewInner.hidden = false;
     cfgKind = null;
   }
@@ -2761,6 +2902,163 @@
       gbLoadList();
     }).catch(function () { btn.disabled = false; btn.textContent = "Restore"; e.textContent = "Network error."; e.hidden = false; });
   }
+
+  /* ---- External Backup (SSH device pull -> SCP/SFTP/FTP, scheduled) ---- */
+  function ebErr(m) { var e = document.getElementById("eb-err"); e.textContent = m || ""; e.hidden = !m; }
+  function ebFlavorSync() {
+    var isNew = document.getElementById("eb-flavor").value === "new";
+    document.getElementById("eb-classic-fields").hidden = isNew;
+    document.getElementById("eb-new-fields").hidden = !isNew;
+  }
+  function ebFmtTime(ts) {
+    if (!ts) return "—";
+    return new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  }
+  function openExtBackup() {
+    overviewInner.hidden = true;
+    configForm.hidden = true;
+    detailEl.hidden = true;
+    document.getElementById("viewcfg").hidden = true;
+    document.getElementById("grpbak").hidden = true;
+    document.getElementById("extbak").hidden = false;
+    ebErr("");
+    document.getElementById("eb-central-result").textContent = "";
+    document.getElementById("eb-dest-result").textContent = "";
+    ebLoad();
+  }
+  function ebLoad() {
+    api("/api/backup/config").then(function (res) {
+      if (!res.ok) { ebErr((res.body && res.body.error) || "Could not load backup settings."); return; }
+      ebRender(res.body);
+    }).catch(function () { ebErr("Network error loading backup settings."); });
+  }
+  function ebRender(cfg) {
+    document.getElementById("eb-flavor").value = cfg.flavor || "classic";
+    ebFlavorSync();
+    document.getElementById("eb-baseurl").value = cfg.central.baseUrl || "";
+    document.getElementById("eb-clientid").value = cfg.central.clientId || "";
+    document.getElementById("eb-clientsecret").value = "";
+    document.getElementById("eb-clientsecret").placeholder = cfg.central.clientSecret ? "•••••••• (unchanged)" : "";
+    document.getElementById("eb-refresh").value = "";
+    document.getElementById("eb-refresh").placeholder = cfg.central.refreshToken ? "•••••••• (unchanged)" : "";
+    document.getElementById("eb-cluster").value = cfg.central.clusterUrl || "";
+    document.getElementById("eb-nc-clientid").value = cfg.central.clientId || "";
+    document.getElementById("eb-nc-clientsecret").value = "";
+    document.getElementById("eb-nc-clientsecret").placeholder = cfg.central.clientSecret ? "•••••••• (unchanged)" : "";
+    document.getElementById("eb-dev-user").value = cfg.deviceAuth.username || "";
+    document.getElementById("eb-dev-pass").value = "";
+    document.getElementById("eb-dev-pass").placeholder = cfg.deviceAuth.password ? "•••••••• (unchanged)" : "";
+    document.getElementById("eb-proto").value = cfg.destination.protocol || "sftp";
+    document.getElementById("eb-host").value = cfg.destination.host || "";
+    document.getElementById("eb-port").value = cfg.destination.port || "";
+    document.getElementById("eb-dest-user").value = cfg.destination.username || "";
+    document.getElementById("eb-dest-pass").value = "";
+    document.getElementById("eb-dest-pass").placeholder = cfg.destination.password ? "•••••••• (unchanged)" : "";
+    document.getElementById("eb-path").value = cfg.destination.basePath || "";
+    document.getElementById("eb-every").value = String(cfg.schedule.everyHours || 24);
+    document.getElementById("eb-at").value = cfg.schedule.atTime || "02:00";
+    document.getElementById("eb-enabled").checked = !!cfg.enabled;
+
+    var bits = [cfg.enabled ? "Enabled" : "Disabled"];
+    if (cfg.running) bits.push("running now…");
+    if (cfg.nextRun && cfg.enabled) bits.push("next run " + ebFmtTime(cfg.nextRun));
+    if (cfg.lastRun) bits.push("last run " + ebFmtTime(cfg.lastRun.startedAt) + " — " + cfg.lastRun.message);
+    document.getElementById("extbak-status").textContent = bits.join(" · ");
+    ebRenderHistory(cfg.history || []);
+  }
+  function ebRenderHistory(hist) {
+    var box = document.getElementById("eb-history");
+    if (!hist.length) { box.innerHTML = '<p class="cgroup-count">No runs yet.</p>'; return; }
+    box.innerHTML = "";
+    hist.forEach(function (r) {
+      var d = document.createElement("div");
+      var head = document.createElement("div");
+      head.textContent = ebFmtTime(r.startedAt) + "  ·  " + r.trigger + "  ·  " + r.message;
+      d.appendChild(head);
+      if (r.errors && r.errors.length) {
+        var ul = document.createElement("ul");
+        r.errors.forEach(function (e) {
+          var li = document.createElement("li");
+          li.textContent = e.device + " (" + e.ip + ", " + e.category + "): " + e.error;
+          ul.appendChild(li);
+        });
+        d.appendChild(ul);
+      }
+      box.appendChild(d);
+    });
+  }
+  function ebPayload() {
+    var isNew = document.getElementById("eb-flavor").value === "new";
+    return {
+      flavor: document.getElementById("eb-flavor").value,
+      central: isNew ? {
+        clusterUrl: document.getElementById("eb-cluster").value.trim(),
+        clientId: document.getElementById("eb-nc-clientid").value.trim(),
+        clientSecret: document.getElementById("eb-nc-clientsecret").value,
+      } : {
+        baseUrl: document.getElementById("eb-baseurl").value.trim(),
+        clientId: document.getElementById("eb-clientid").value.trim(),
+        clientSecret: document.getElementById("eb-clientsecret").value,
+        refreshToken: document.getElementById("eb-refresh").value,
+      },
+      deviceAuth: {
+        username: document.getElementById("eb-dev-user").value.trim(),
+        password: document.getElementById("eb-dev-pass").value,
+      },
+      destination: {
+        protocol: document.getElementById("eb-proto").value,
+        host: document.getElementById("eb-host").value.trim(),
+        port: document.getElementById("eb-port").value.trim() || null,
+        username: document.getElementById("eb-dest-user").value.trim(),
+        password: document.getElementById("eb-dest-pass").value,
+        basePath: document.getElementById("eb-path").value.trim(),
+      },
+      schedule: {
+        everyHours: parseInt(document.getElementById("eb-every").value, 10),
+        atTime: document.getElementById("eb-at").value.trim() || "02:00",
+      },
+      enabled: document.getElementById("eb-enabled").checked,
+    };
+  }
+  function ebSave() {
+    ebErr("");
+    api("/api/backup/config", { method: "POST", body: JSON.stringify(ebPayload()) }).then(function (res) {
+      if (!res.ok) { ebErr((res.body && res.body.error) || "Could not save."); return; }
+      ebRender(res.body);
+    }).catch(function () { ebErr("Network error."); });
+  }
+  function ebTestCentral() {
+    var r = document.getElementById("eb-central-result");
+    r.textContent = "Testing…";
+    var p = ebPayload();
+    api("/api/backup/test-central", { method: "POST", body: JSON.stringify({ flavor: p.flavor, central: p.central }) })
+      .then(function (res) {
+        if (!res.ok) { r.textContent = (res.body && res.body.error) || "Failed."; return; }
+        var b = res.body;
+        r.textContent = "Connected — " + b.deviceCount + " device(s) with a management IP (" +
+          b.byCategory.ap + " AP, " + b.byCategory.switch + " switch, " + b.byCategory.gateway + " gateway).";
+        ebLoad();
+      }).catch(function () { r.textContent = "Network error."; });
+  }
+  function ebTestDest() {
+    var r = document.getElementById("eb-dest-result");
+    r.textContent = "Testing…";
+    var p = ebPayload();
+    api("/api/backup/test-destination", { method: "POST", body: JSON.stringify(p.destination) })
+      .then(function (res) {
+        if (!res.ok) { r.textContent = (res.body && res.body.error) || "Failed."; return; }
+        r.textContent = "Connected — wrote a small test file to " + res.body.path;
+        ebLoad();
+      }).catch(function () { r.textContent = "Network error."; });
+  }
+  function ebRunNow() {
+    ebErr("");
+    api("/api/backup/run-now", { method: "POST" }).then(function (res) {
+      if (!res.ok) { ebErr((res.body && res.body.error) || "Could not start."); return; }
+      ebLoad();
+    }).catch(function () { ebErr("Network error."); });
+  }
+
   function renderGroupList(filter) {
     var f = (filter || "").toLowerCase();
     var shown = cfgGroups.filter(function (g) { return g.toLowerCase().indexOf(f) !== -1; });
@@ -2808,6 +3106,14 @@
     document.getElementById("gb-restore-modal").hidden = true;
   });
   document.getElementById("gb-r-go").addEventListener("click", gbDoRestore);
+  var ebCardBtn = document.querySelector("[data-extbackup]");
+  if (ebCardBtn) ebCardBtn.addEventListener("click", openExtBackup);
+  document.getElementById("extbak-back").addEventListener("click", closeConfig);
+  document.getElementById("eb-flavor").addEventListener("change", ebFlavorSync);
+  document.getElementById("eb-test-central").addEventListener("click", ebTestCentral);
+  document.getElementById("eb-test-dest").addEventListener("click", ebTestDest);
+  document.getElementById("eb-save").addEventListener("click", ebSave);
+  document.getElementById("eb-run-now").addEventListener("click", ebRunNow);
   document.getElementById("cf-reset-tpl").addEventListener("click", applyTemplate);
   document.getElementById("cf-load-group").addEventListener("change", function () {
     loadNamesForGroup(this.value);

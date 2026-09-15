@@ -1,8 +1,11 @@
 """Aruba Central Automation — thin backend.
 
 Sessions live only in this process's memory, keyed by a per-browser cookie.
-Nothing is written to disk and nothing persists a restart. A different browser
-(no cookie) always starts a fresh session.
+Nothing is written to disk and nothing persists a restart, other than the
+one deliberate exception in the External Backup feature (see below), which
+needs its own Central + device + destination credentials to survive restarts
+so its schedule can run unattended. A different browser (no cookie) always
+starts a fresh session.
 """
 from __future__ import annotations
 
@@ -4410,6 +4413,422 @@ async def webhooks(kind: str, request: Request) -> JSONResponse:
     if body.get("regenerate"):
         conn["webhookKey"] = "whk_" + secrets.token_urlsafe(12)
     return JSONResponse(_state(sess))
+
+
+# --------------------------------------------------------------------------- #
+# External Backup — SSH into every AP/switch/gateway's management IP, pull its
+# running config, upload it to an external SCP/SFTP/FTP server, on a schedule.
+#
+# Unlike the rest of this app, this feature's config (Central creds, device
+# SSH login, destination server login) is deliberately PERSISTED to a JSON
+# file on disk (0600, service-user-only, never encrypted) so a scheduled job
+# can run unattended across restarts — it is the one intentional exception to
+# "nothing survives a restart" in this app. It only works when this app itself
+# is reachable to the devices over the network (e.g. run on your own LAN /
+# Docker host), since it SSHes to each device directly rather than going
+# through Central's cloud API.
+# --------------------------------------------------------------------------- #
+import asyncssh  # noqa: E402
+import calendar  # noqa: E402
+import ftplib  # noqa: E402
+import io  # noqa: E402
+import posixpath  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+BACKUP_DIR = Path(BASE_DIR).parent / "data"
+BACKUP_FILE = BACKUP_DIR / "backup_config.json"
+_BACKUP_SECRET_FIELDS = {("central", "clientSecret"), ("central", "refreshToken"),
+                         ("deviceAuth", "password"), ("destination", "password")}
+_BACKUP_FOLDER = {"ap": "APs", "switch": "Switches", "gateway": "Gateways"}
+_BACKUP_CMDS = {
+    "ap": ["show running-config"],
+    "switch": ["show running-config"],
+    "gateway": ["show running-config"],
+}
+
+_DEFAULT_BACKUP_CFG: dict[str, Any] = {
+    "enabled": False,
+    "flavor": "classic",
+    "central": {"baseUrl": "", "clusterUrl": "", "clientId": "", "clientSecret": "", "refreshToken": ""},
+    "deviceAuth": {"username": "", "password": ""},
+    "destination": {"protocol": "sftp", "host": "", "port": None, "username": "", "password": "", "basePath": ""},
+    "schedule": {"everyHours": 24, "atTime": "02:00"},
+    "state": {"accessToken": "", "accessExpiry": 0},
+    "nextRun": None,
+    "lastRun": None,
+    "history": [],
+}
+_backup_cfg_cache: Optional[dict[str, Any]] = None
+_backup_status = {"running": False}
+_backup_task: Optional[asyncio.Task] = None
+
+
+def _deep_merge(base: dict, upd: dict) -> None:
+    for k, v in (upd or {}).items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
+def _backup_load() -> dict[str, Any]:
+    global _backup_cfg_cache
+    if _backup_cfg_cache is not None:
+        return _backup_cfg_cache
+    cfg = json.loads(json.dumps(_DEFAULT_BACKUP_CFG))
+    if BACKUP_FILE.exists():
+        try:
+            _deep_merge(cfg, json.loads(BACKUP_FILE.read_text()))
+        except Exception:
+            pass
+    _backup_cfg_cache = cfg
+    return cfg
+
+
+def _backup_save(cfg: dict[str, Any]) -> None:
+    global _backup_cfg_cache
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = BACKUP_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2))
+    os.chmod(tmp, 0o600)
+    tmp.replace(BACKUP_FILE)
+    os.chmod(BACKUP_FILE, 0o600)
+    _backup_cfg_cache = cfg
+
+
+def _backup_compute_next(schedule: dict[str, Any], after: Optional[float] = None) -> float:
+    """Next run time (UTC epoch seconds): the first `atTime` (UTC) slot,
+    stepped forward by `everyHours` until it's in the future."""
+    every = max(1, int(schedule.get("everyHours") or 24)) * 3600
+    base = after if after is not None else _now()
+    try:
+        hh, mm = [int(x) for x in str(schedule.get("atTime") or "02:00").split(":")[:2]]
+    except Exception:
+        hh, mm = 2, 0
+    t = time.gmtime(base)
+    anchor = calendar.timegm((t.tm_year, t.tm_mon, t.tm_mday, hh, mm, 0, 0, 0, 0))
+    while anchor <= base:
+        anchor += every
+    return anchor
+
+
+async def _backup_get_token(cfg: dict[str, Any]) -> str:
+    """A valid access token for the job's stored Central credentials.
+    Classic refresh tokens rotate on every use, so the new one is persisted
+    immediately — losing it would strand the job with a dead credential."""
+    st = cfg["state"]
+    if st.get("accessToken") and st.get("accessExpiry", 0) - 60 > _now():
+        return st["accessToken"]
+    c = cfg["central"]
+    if cfg["flavor"] == "classic":
+        host = _clean_host(c["baseUrl"])
+        if not (host and c["clientId"] and c["clientSecret"] and c["refreshToken"]):
+            raise RuntimeError("Classic Central credentials are incomplete.")
+        tok = await _token_request(f"https://{host}/oauth2/token", params={
+            "client_id": c["clientId"], "client_secret": c["clientSecret"],
+            "grant_type": "refresh_token", "refresh_token": c["refreshToken"],
+        })
+        c["refreshToken"] = tok.get("refresh_token", c["refreshToken"])
+    else:
+        if not (c["clusterUrl"] and c["clientId"] and c["clientSecret"]):
+            raise RuntimeError("New Central credentials are incomplete.")
+        tok = await _token_request(NEW_CENTRAL_TOKEN_URL, data={
+            "grant_type": "client_credentials",
+            "client_id": c["clientId"], "client_secret": c["clientSecret"],
+        })
+    st["accessToken"] = tok["access_token"]
+    st["accessExpiry"] = _now() + int(tok.get("expires_in", 7200))
+    _backup_save(cfg)
+    return st["accessToken"]
+
+
+async def _backup_discover_devices(flavor: str, host: str, token: str) -> list[dict[str, str]]:
+    """[{serial, name, ip, category}] for every AP/switch/gateway that has a
+    usable management IP — devices without one can't be reached over SSH."""
+    hdr = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    out: list[dict[str, str]] = []
+
+    def _usable(ip: str) -> bool:
+        return bool(ip) and ip not in ("—", "-", "0.0.0.0")
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as cx:
+        if flavor == "classic":
+            labels = {"access-points": "ap", "switches": "switch", "gateways": "gateway"}
+            for cat, (path, key) in CLASSIC_SOURCES.items():
+                raw, _t, _sc = await _fetch_all(cx, f"https://{host}{path}", hdr, style="offset",
+                                                params={"limit": "1000"}, item_key=key)
+                for x in raw:
+                    row = _classic_norm_device(x)
+                    if _usable(row["ip"]):
+                        out.append({"serial": row["serial"], "name": row["name"],
+                                   "ip": row["ip"], "category": labels[cat]})
+        else:
+            raw, _t, _sc = await _fetch_all(cx, f"https://{host}/network-monitoring/v1/devices",
+                                            hdr, style="cursor")
+            for x in raw:
+                cat = _categorize(x.get("deviceType", ""))
+                if cat not in ("ap", "switch", "gateway"):
+                    continue
+                row = _norm_device(x)
+                if _usable(row["ip"]):
+                    out.append({"serial": row["serial"], "name": row["name"], "ip": row["ip"], "category": cat})
+    return out
+
+
+async def _backup_ssh_pull(ip: str, username: str, password: str, category: str) -> tuple[Optional[str], str]:
+    """(config_text, error) — tries each candidate CLI command for this device
+    category over one SSH exec session (no PTY, so most devices don't page)."""
+    try:
+        async with asyncssh.connect(ip, username=username, password=password,
+                                    known_hosts=None, connect_timeout=12) as conn:
+            last_err = "no output"
+            for cmd in _BACKUP_CMDS.get(category, ["show running-config"]):
+                try:
+                    r = await asyncio.wait_for(conn.run(cmd, check=False), timeout=30)
+                    out = (r.stdout or "").strip()
+                    low = out.lower()
+                    if out and "% invalid" not in low and "unknown command" not in low and "% error" not in low:
+                        return out, ""
+                    last_err = (out or "empty output")[:200]
+                except Exception as e:  # noqa: BLE001
+                    last_err = str(e)
+            return None, last_err
+    except asyncssh.PermissionDenied:
+        return None, "SSH authentication failed (check the device admin username/password)"
+    except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:  # noqa: BLE001
+        return None, f"SSH connect failed: {e or type(e).__name__}"
+
+
+def _backup_safe_name(s: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", s or "device").strip("_") or "device"
+
+
+def _backup_ftp_upload(dest: dict[str, Any], rel: str, data: bytes) -> None:
+    ftp = ftplib.FTP()
+    ftp.connect(dest["host"], int(dest.get("port") or 21), timeout=20)
+    ftp.login(dest.get("username") or "anonymous", dest.get("password") or "")
+    if rel.startswith("/"):
+        ftp.cwd("/")
+    parts = [p for p in rel.split("/") if p]
+    for part in parts[:-1]:
+        try:
+            ftp.mkd(part)
+        except ftplib.error_perm:
+            pass
+        ftp.cwd(part)
+    ftp.storbinary("STOR " + parts[-1], io.BytesIO(data))
+    ftp.quit()
+
+
+async def _sftp_mkdirs(sftp: Any, dirpath: str) -> None:
+    """`mkdir -p` over SFTP — handles both `/absolute/paths` and
+    `relative/paths` (the latter resolve under the login's home dir)."""
+    if not dirpath or dirpath == "/":
+        return
+    parent = posixpath.dirname(dirpath)
+    if parent and parent != dirpath:
+        await _sftp_mkdirs(sftp, parent)
+    try:
+        await sftp.mkdir(dirpath)
+    except asyncssh.SFTPError:
+        pass  # already exists
+
+
+async def _backup_upload(dest: dict[str, Any], rel: str, data: bytes) -> None:
+    proto = dest.get("protocol")
+    if proto in ("scp", "sftp"):
+        # Both land on an SFTP-over-SSH connection to the destination — the
+        # vast majority of "SCP servers" also speak SFTP, and asyncssh's SFTP
+        # client makes directory creation + upload one clean async call.
+        async with asyncssh.connect(dest["host"], port=int(dest.get("port") or 22),
+                                    username=dest["username"], password=dest.get("password") or None,
+                                    known_hosts=None, connect_timeout=15) as conn:
+            async with conn.start_sftp_client() as sftp:
+                await _sftp_mkdirs(sftp, posixpath.dirname(rel))
+                async with sftp.open(rel, "wb") as f:
+                    await f.write(data)
+    elif proto == "ftp":
+        await asyncio.to_thread(_backup_ftp_upload, dest, rel, data)
+    else:
+        raise ValueError(f"Unsupported destination protocol {proto!r}")
+
+
+async def _run_backup_job(trigger: str = "scheduled") -> dict[str, Any]:
+    cfg = _backup_load()
+    report: dict[str, Any] = {
+        "trigger": trigger, "startedAt": _now(), "finishedAt": None, "ok": False,
+        "counts": {"ap": 0, "switch": 0, "gateway": 0}, "errors": [], "message": "",
+    }
+    if not cfg.get("enabled"):
+        report["message"] = "Backup job is disabled."
+        report["finishedAt"] = _now()
+        return report
+    if _backup_status["running"]:
+        report["message"] = "A run was already in progress."
+        report["finishedAt"] = _now()
+        return report
+    _backup_status["running"] = True
+    try:
+        c = cfg["central"]
+        host = _clean_host(c["baseUrl"]) if cfg["flavor"] == "classic" else _clean_host(c["clusterUrl"])
+        if not host:
+            raise RuntimeError("Central base URL / cluster is not configured.")
+        token = await _backup_get_token(cfg)
+        devices = await _backup_discover_devices(cfg["flavor"], host, token)
+        if not devices:
+            report["message"] = "No devices with a management IP were found."
+        auth, dest = cfg["deviceAuth"], cfg["destination"]
+        base = (dest.get("basePath") or "").strip().rstrip("/")
+        ts = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        sem = asyncio.Semaphore(5)
+
+        async def handle(dev: dict[str, str]) -> None:
+            async with sem:
+                text, err = await _backup_ssh_pull(dev["ip"], auth["username"], auth["password"], dev["category"])
+                if text is None:
+                    report["errors"].append({"device": dev["name"], "ip": dev["ip"],
+                                             "category": dev["category"], "error": err})
+                    return
+                fname = f"{_backup_safe_name(dev['name'] or dev['serial'])}_{ts}.cfg"
+                rel = "/".join(p for p in (base, _BACKUP_FOLDER[dev["category"]], fname) if p)
+                try:
+                    await _backup_upload(dest, rel, text.encode("utf-8", "replace"))
+                    report["counts"][dev["category"]] += 1
+                except Exception as e:  # noqa: BLE001
+                    report["errors"].append({"device": dev["name"], "ip": dev["ip"],
+                                             "category": dev["category"], "error": f"upload failed: {e}"})
+
+        if devices:
+            await asyncio.gather(*(handle(d) for d in devices))
+        report["ok"] = True
+        if not report["message"]:
+            total = sum(report["counts"].values())
+            report["message"] = f"Backed up {total} of {len(devices)} device(s)."
+    except Exception as e:  # noqa: BLE001
+        report["message"] = f"Backup run failed: {e}"
+    finally:
+        report["finishedAt"] = _now()
+        _backup_status["running"] = False
+        cfg = _backup_load()
+        cfg["lastRun"] = report
+        cfg["history"] = ([report] + cfg.get("history", []))[:20]
+        cfg["nextRun"] = _backup_compute_next(cfg["schedule"])
+        _backup_save(cfg)
+    return report
+
+
+async def _backup_scheduler_loop() -> None:
+    while True:
+        try:
+            cfg = _backup_load()
+            if not cfg.get("enabled"):
+                await asyncio.sleep(30)
+                continue
+            nxt = cfg.get("nextRun")
+            if not nxt:
+                nxt = _backup_compute_next(cfg["schedule"])
+                cfg["nextRun"] = nxt
+                _backup_save(cfg)
+            await asyncio.sleep(max(5, min(nxt - _now(), 300)))
+            if _now() >= nxt and not _backup_status["running"]:
+                await _run_backup_job("scheduled")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            await asyncio.sleep(30)
+
+
+@app.on_event("startup")
+async def _backup_startup() -> None:
+    global _backup_task
+    _backup_task = asyncio.create_task(_backup_scheduler_loop())
+
+
+def _backup_public(cfg: dict[str, Any]) -> dict[str, Any]:
+    out = json.loads(json.dumps(cfg))
+    for section, field in _BACKUP_SECRET_FIELDS:
+        out[section][field] = bool(out.get(section, {}).get(field))
+    out["running"] = _backup_status["running"]
+    out["state"] = {"tokenValid": bool(cfg["state"].get("accessToken"))
+                    and cfg["state"].get("accessExpiry", 0) > _now()}
+    return out
+
+
+def _backup_apply_section(cfg: dict[str, Any], section: str, incoming: dict[str, Any]) -> None:
+    cur = cfg.setdefault(section, {})
+    for k, v in (incoming or {}).items():
+        if (section, k) in _BACKUP_SECRET_FIELDS and not v:
+            continue  # blank secret field = "leave the stored one alone"
+        cur[k] = v
+
+
+@app.get("/api/backup/config")
+async def backup_get_config() -> JSONResponse:
+    return JSONResponse(_backup_public(_backup_load()))
+
+
+@app.post("/api/backup/config")
+async def backup_set_config(request: Request) -> JSONResponse:
+    body = await request.json()
+    cfg = _backup_load()
+    if body.get("flavor") in ("classic", "new"):
+        cfg["flavor"] = body["flavor"]
+    for section in ("central", "deviceAuth", "destination", "schedule"):
+        _backup_apply_section(cfg, section, body.get(section))
+    if "enabled" in body:
+        cfg["enabled"] = bool(body["enabled"])
+    cfg["state"] = {"accessToken": "", "accessExpiry": 0}  # credentials may have changed
+    cfg["nextRun"] = _backup_compute_next(cfg["schedule"])
+    _backup_save(cfg)
+    return JSONResponse(_backup_public(cfg))
+
+
+@app.post("/api/backup/test-central")
+async def backup_test_central(request: Request) -> JSONResponse:
+    body = await request.json()
+    cfg = _backup_load()
+    if body.get("flavor") in ("classic", "new"):
+        cfg["flavor"] = body["flavor"]
+    _backup_apply_section(cfg, "central", body.get("central"))
+    cfg["state"] = {"accessToken": "", "accessExpiry": 0}
+    _backup_save(cfg)
+    try:
+        token = await _backup_get_token(cfg)
+    except _TokenError as e:
+        return _err(502, str(e))
+    except (httpx.HTTPError, RuntimeError) as e:
+        return _err(400, str(e))
+    c = cfg["central"]
+    host = _clean_host(c["baseUrl"]) if cfg["flavor"] == "classic" else _clean_host(c["clusterUrl"])
+    devices = await _backup_discover_devices(cfg["flavor"], host, token)
+    by_cat = {cat: len([d for d in devices if d["category"] == cat]) for cat in ("ap", "switch", "gateway")}
+    return JSONResponse({"ok": True, "deviceCount": len(devices), "byCategory": by_cat})
+
+
+@app.post("/api/backup/test-destination")
+async def backup_test_destination(request: Request) -> JSONResponse:
+    body = await request.json()
+    cfg = _backup_load()
+    _backup_apply_section(cfg, "destination", body)
+    _backup_save(cfg)
+    dest = cfg["destination"]
+    if not (dest.get("host") and dest.get("username") and dest.get("protocol")):
+        return _err(400, "Protocol, host and username are required.")
+    base = (dest.get("basePath") or "").strip().rstrip("/")
+    rel = "/".join(p for p in (base, "APs", "_acs_connection_test.txt") if p)
+    try:
+        await _backup_upload(dest, rel, b"Aruba Central Automation - connection test\n")
+    except Exception as e:  # noqa: BLE001
+        return _err(502, f"Could not reach/write to the destination: {e}")
+    return JSONResponse({"ok": True, "path": rel})
+
+
+@app.post("/api/backup/run-now")
+async def backup_run_now() -> JSONResponse:
+    if _backup_status["running"]:
+        return _err(409, "A backup run is already in progress.")
+    asyncio.create_task(_run_backup_job("manual"))
+    return JSONResponse({"ok": True, "started": True})
 
 
 @app.get("/")

@@ -165,6 +165,8 @@ curl -sk https://<host>/healthz
 | `POST /api/config/classic/backup` | `{group, name, do_not_delete}` → `POST /configuration/v1/groups/snapshot/{group}` (template/mixed groups only; name `[A-Za-z0-9_.-]{1,64}`) |
 | `PATCH /api/config/classic/backup-protect` | `{group, names[], do_not_delete}` → one `PATCH /configuration/v1/groups/{g}/snapshots {name, do_not_delete}` per name |
 | `POST /api/config/classic/backup-restore` | `{group, name, confirm, device_type}` — `confirm` must equal `group`; `device_type` ∈ IAP/CX/ArubaSwitch/MobilityController/ALL → `POST …/snapshots/{n}/restore?device_type=` |
+| `GET/POST /api/backup/config` | External Backup job settings — see the dedicated section below |
+| `POST /api/backup/test-central` \| `test-destination` \| `run-now` | External Backup test/trigger endpoints |
 | `POST /api/nc-config/bulk-radio` | `{scopes[], bands{}}` — edit channel/power on the radios profile assigned to each New-Central group |
 | `GET /api/list/{flavor}/access-rules` + `GET /api/detail/{flavor}/acl/{name}` | WLAN access rules / user roles (view) |
 | `GET /api/list/{flavor}/ap-radios` | Per-AP current channel / TX power / utilisation per band (2.4 / 5 / 6 GHz) — read-only |
@@ -726,6 +728,101 @@ for each group it GETs the live CLI, drops any block whose header is in `remove`
 All the CLI-push cards share the group multi-select, **Preview merge** (exact
 per-group text) and a confirm-gated **Deploy**.
 
+## External Backup (SSH device pull, scheduled)
+
+An **"External Backup"** Account Overview card (visible for both flavors) →
+the `#extbak` panel. This is a deliberate departure from the rest of the app:
+it's the **one feature whose config is persisted to disk** (`data/backup_config.json`,
+created 0600, `data/` gitignored), because a scheduled job has to survive
+process restarts. Everything else in this app stays in-memory-only.
+
+**What it does**: on a schedule (or on demand), it discovers every AP/switch/
+gateway's management IP via Central's monitoring API, **SSHes directly into
+each device** (not through Central) to run `show running-config`, and uploads
+the result to an external SCP/SFTP/FTP server, sorted into `APs/` /
+`Switches/` / `Gateways/` folders with the device name + a `YYYYmmdd-HHMMSS`
+timestamp in the filename. This only works when the app itself is on a host
+with real network/SSH reachability to the devices — the UI says so up front
+(`.warnbox` in the panel).
+
+### Persistence & token refresh
+
+- `_backup_load()` / `_backup_save()` — a deep-merged-over-defaults JSON file,
+  cached in `_backup_cfg_cache`, rewritten atomically (`.tmp` + `os.replace`)
+  with `chmod 0600` on every save.
+- `_backup_get_token(cfg)` — Classic: refresh-token grant; **the rotated
+  refresh token Central returns is persisted immediately** (`cfg["central"]["refreshToken"]
+  = tok.get("refresh_token", ...)` then `_backup_save`), or the *next* scheduled
+  run would inherit a dead, already-consumed token. New Central: client_credentials
+  grant every time (stable creds, no rotation, so nothing to persist beyond
+  what's already saved). Access token cached in `cfg["state"]` with a 60s
+  expiry buffer.
+- API responses never return secret values — `_backup_public()` replaces each
+  of `central.clientSecret`, `central.refreshToken`, `deviceAuth.password`,
+  `destination.password` with a bool ("is one set?"). `POST /api/backup/config`
+  (`_backup_apply_section`) treats a **blank** secret field in the request body
+  as "leave the stored one alone" — the frontend clears these inputs after
+  every load/save so it never echoes a secret back, and only overwrites what
+  the user actually retypes.
+
+### Discovery, SSH pull, upload
+
+- `_backup_discover_devices(flavor, host, token)` — reuses the same
+  normalizers as Inventory/View Configuration (`CLASSIC_SOURCES` +
+  `_classic_norm_device` for Classic; `/network-monitoring/v1/devices` +
+  `_categorize` + `_norm_device` for New Central), filters to devices with a
+  real IP (`_usable`: not empty, "—", or "0.0.0.0").
+- `_backup_ssh_pull(ip, username, password, category)` — `asyncssh.connect(...,
+  known_hosts=None)` (device host keys aren't pre-known/pinned — accept-any,
+  documented trade-off) then `conn.run(cmd, check=False)` **without a PTY**,
+  which is what lets a plain one-shot `show running-config` skip most devices'
+  interactive pager. `_BACKUP_CMDS` is a per-category list of candidate
+  commands tried in order until one returns non-empty, non-error output —
+  currently just `["show running-config"]` for all three categories (AOS8/
+  Instant, AOS-CX and AOS-S switches, and MC/gateway CLIs all accept it).
+  **Only verified mechanically** (asyncssh connect/auth/exec against a plain
+  Linux sshd — real connect, real auth-failure, and real timeout paths all
+  behaved correctly); **not yet run against a real Aruba device** — no test
+  device with known SSH admin credentials was available. AOS10 APs in
+  particular may not expose a local CLI over SSH at all (they're normally
+  fully cloud-managed) — if that turns out to be the case, those rows will
+  just show up as per-device errors in the run's history, not crash the job.
+- `_backup_upload(dest, rel, data)` — SCP and SFTP are both implemented as
+  **SFTP-over-SSH** via asyncssh (`start_sftp_client`, `_sftp_mkdirs` for
+  `mkdir -p` semantics, `sftp.open(...).write(...)`) since almost every "SCP
+  server" also speaks SFTP; FTP uses stdlib `ftplib` off the event loop
+  (`asyncio.to_thread`). Both handle an **absolute** `basePath` (leading `/`)
+  correctly — verified live against the deployment box's own sshd
+  (`/tmp/acs_backup_test.../APs/_acs_connection_test.txt` landed exactly
+  where expected); FTP itself was not live-tested (no FTP server on hand).
+
+### Scheduling
+
+- `_backup_compute_next(schedule, after)` — the next `atTime` (UTC, `HH:MM`)
+  slot, stepped forward by `everyHours` until it's in the future
+  (`calendar.timegm`, so it's explicitly UTC regardless of server timezone).
+- `_backup_scheduler_loop()` — an `asyncio.create_task` started from
+  `@app.on_event("startup")`; wakes at most every 5 minutes to notice
+  config/enable changes, sleeps until `nextRun` otherwise, then calls
+  `_run_backup_job("scheduled")`. A concurrent run is prevented by the
+  `_backup_status["running"]` guard (also checked by `POST /api/backup/run-now`,
+  which 409s if a run is already in progress).
+- `_run_backup_job(trigger)` bounds device concurrency with
+  `asyncio.Semaphore(5)` so it doesn't hammer the LAN/host, and never lets one
+  bad device abort the run — every failure (SSH or upload) becomes one entry
+  in `report["errors"]`, keyed by device/ip/category. `cfg["history"]` keeps
+  the last 20 runs.
+
+### Endpoints
+
+| Route | Purpose |
+|---|---|
+| `GET /api/backup/config` | current settings (secrets masked to booleans) + `running`/`lastRun`/`nextRun`/`history` |
+| `POST /api/backup/config` | save settings (blank secret field ⇒ keep existing); recomputes `nextRun` |
+| `POST /api/backup/test-central` | applies + saves the submitted Central fields, does a real token fetch (rotates/persists the refresh token), then discovery — returns a device count by category |
+| `POST /api/backup/test-destination` | applies + saves the submitted destination fields, writes (and leaves) a small `_acs_connection_test.txt` under `<basePath>/APs/` |
+| `POST /api/backup/run-now` | fires `_run_backup_job("manual")` as a background task; 409 if one's already running |
+
 ## Branding
 
 - Header logo: `app/static/logo.jpg` — AI-generated; its cloud/swoosh resembles
@@ -738,3 +835,12 @@ per-group text) and a confirm-gated **Deploy**.
   refresh**, so `/api/*` calls 401 after ~2 h and the user reconnects. Classic
   additionally rotates the refresh token on every use.
 - `LIST_CAP = 6000` rows per entity.
+- **External Backup** has no auth of its own beyond whatever fronts the whole
+  app (there's no login system here at all) — anyone who can reach the UI can
+  read/change the backup job, and its secrets sit in a plaintext (if
+  0600-permissioned) JSON file on disk. Device SSH host keys are accepted
+  unconditionally (`known_hosts=None`, both for the devices and the
+  destination server) — no host-key pinning/verification. `show
+  running-config` over SSH was verified mechanically but never against a real
+  Aruba device; FTP upload was implemented but never live-tested (no FTP
+  server on hand). AOS10 APs may not expose a local CLI over SSH at all.
