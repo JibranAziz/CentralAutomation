@@ -4575,28 +4575,109 @@ async def _backup_discover_devices(flavor: str, host: str, token: str) -> list[d
     return out
 
 
-async def _backup_ssh_pull(ip: str, username: str, password: str, category: str) -> tuple[Optional[str], str]:
-    """(config_text, error) — tries each candidate CLI command for this device
-    category over one SSH exec session (no PTY, so most devices don't page)."""
+_BACKUP_BAD_OUTPUT = ("% invalid", "unknown command", "% error", "% parse error",
+                     "only cli connections are allowed")
+
+
+def _backup_output_ok(out: str) -> bool:
+    out = (out or "").strip()
+    if not out:
+        return False
+    low = out.lower()
+    return not any(m in low for m in _BACKUP_BAD_OUTPUT)
+
+
+def _backup_clean_shell_output(out: str, cmd: str) -> str:
+    """Strips the echoed command line and the trailing device prompt that an
+    interactive PTY session leaves in the capture — cosmetic only, the config
+    body itself is untouched."""
+    lines = out.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if lines and lines[0].strip() == cmd.strip():
+        lines = lines[1:]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and re.match(r"^\S+[#>]\s*$", lines[-1].strip()):
+        lines.pop()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+async def _backup_shell_capture(conn: Any, cmd: str, idle_timeout: float = 2.5,
+                                max_wait: float = 35.0) -> str:
+    """Runs `cmd` in an interactive PTY shell and reads until the device goes
+    quiet for `idle_timeout` seconds (no fixed prompt string to wait for that
+    works across AOS8/Instant/AOS10/AOS-CX/AOS-S/gateway CLIs)."""
+    proc = await conn.create_process(term_type="vt100", term_size=(200, 50))
     try:
-        async with asyncssh.connect(ip, username=username, password=password,
-                                    known_hosts=None, connect_timeout=12) as conn:
-            last_err = "no output"
+        try:  # drain the login banner / first prompt
+            await asyncio.wait_for(proc.stdout.read(65536), timeout=idle_timeout)
+        except asyncio.TimeoutError:
+            pass
+        proc.stdin.write(cmd + "\n")
+        out, start = "", _now()
+        while _now() - start < max_wait:
+            try:
+                chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=idle_timeout)
+            except asyncio.TimeoutError:
+                break
+            if not chunk:
+                break
+            out += chunk
+        return out
+    finally:
+        try:
+            proc.stdin.write("exit\n")
+        except Exception:  # noqa: BLE001
+            pass
+        proc.close()
+
+
+async def _backup_ssh_connect(ip: str, username: str, password: str) -> Any:
+    return await asyncssh.connect(ip, username=username, password=password,
+                                  known_hosts=None, connect_timeout=12)
+
+
+async def _backup_ssh_pull(ip: str, username: str, password: str, category: str) -> tuple[Optional[str], str]:
+    """(config_text, error). Tries each candidate CLI command two ways: first
+    a plain SSH exec (no PTY — clean output, no pager; what AOS-CX/AOS-S
+    switches and gateways want), then, only if that didn't work, an
+    interactive PTY shell (what Instant/AOS10 APs require — they reject a
+    bare exec with "Only cli connections are allowed", and some close the
+    whole connection when they do, so the PTY attempt reconnects fresh rather
+    than reusing a connection the device may have already killed)."""
+    last_err = "no output"
+    try:
+        async with await _backup_ssh_connect(ip, username, password) as conn:
             for cmd in _BACKUP_CMDS.get(category, ["show running-config"]):
                 try:
                     r = await asyncio.wait_for(conn.run(cmd, check=False), timeout=30)
                     out = (r.stdout or "").strip()
-                    low = out.lower()
-                    if out and "% invalid" not in low and "unknown command" not in low and "% error" not in low:
+                    if _backup_output_ok(out):
                         return out, ""
                     last_err = (out or "empty output")[:200]
                 except Exception as e:  # noqa: BLE001
                     last_err = str(e)
-            return None, last_err
     except asyncssh.PermissionDenied:
         return None, "SSH authentication failed (check the device admin username/password)"
     except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:  # noqa: BLE001
         return None, f"SSH connect failed: {e or type(e).__name__}"
+
+    try:
+        async with await _backup_ssh_connect(ip, username, password) as conn:
+            for cmd in _BACKUP_CMDS.get(category, ["show running-config"]):
+                try:
+                    out = _backup_clean_shell_output(await _backup_shell_capture(conn, cmd), cmd).strip()
+                    if _backup_output_ok(out):
+                        return out, ""
+                    last_err = (out or "empty output")[:200]
+                except Exception as e:  # noqa: BLE001
+                    last_err = str(e)
+    except asyncssh.PermissionDenied:
+        return None, "SSH authentication failed (check the device admin username/password)"
+    except (asyncssh.Error, OSError, asyncio.TimeoutError) as e:  # noqa: BLE001
+        return None, f"SSH connect failed: {e or type(e).__name__}"
+    return None, last_err
 
 
 def _backup_safe_name(s: str) -> str:
