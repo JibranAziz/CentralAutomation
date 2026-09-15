@@ -1509,42 +1509,26 @@
         <p id="extbak-status" class="cgroup-count"></p>
 
         <div class="panel-head" style="font-size:13px;margin:18px 0 8px">Central connection</div>
+        <p class="cgroup-count" style="margin:-2px 0 8px">Classic Central only — External Backup discovers devices via the Classic API, then SSHes to them directly.</p>
         <div class="field-row">
-          <div class="field">
-            <label class="lbl" for="eb-flavor">Flavor</label>
-            <select id="eb-flavor">
-              <option value="classic">Classic Central</option>
-              <option value="new">New Central</option>
-            </select>
+          <div class="field" style="flex:2">
+            <label class="lbl" for="eb-baseurl">Base URL</label>
+            <select id="eb-baseurl" data-mono></select>
           </div>
         </div>
-        <div id="eb-classic-fields">
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="eb-baseurl">Base URL</label>
-              <input type="text" id="eb-baseurl" autocomplete="off" placeholder="internal-apigw.central.arubanetworks.com"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="eb-clientid">Client ID</label>
-              <input type="text" id="eb-clientid" autocomplete="off"></div>
-            <div class="field"><label class="lbl" for="eb-clientsecret">Client Secret</label>
-              <input type="password" id="eb-clientsecret" autocomplete="new-password"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="eb-refresh">Refresh Token</label>
-              <input type="password" id="eb-refresh" autocomplete="new-password"></div>
-          </div>
+        <div class="field" data-custom-for="eb-baseurl" hidden>
+          <label class="lbl" for="eb-baseurl-custom">Custom base URL</label>
+          <input type="text" id="eb-baseurl-custom" data-mono autocomplete="off" placeholder="apigw-yourregion.central.arubanetworks.com">
         </div>
-        <div id="eb-new-fields" hidden>
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="eb-cluster">Cluster URL</label>
-              <input type="text" id="eb-cluster" autocomplete="off" placeholder="apigw-prod2.central.arubanetworks.com"></div>
-          </div>
-          <div class="field-row">
-            <div class="field"><label class="lbl" for="eb-nc-clientid">Client ID</label>
-              <input type="text" id="eb-nc-clientid" autocomplete="off"></div>
-            <div class="field"><label class="lbl" for="eb-nc-clientsecret">Client Secret</label>
-              <input type="password" id="eb-nc-clientsecret" autocomplete="new-password"></div>
-          </div>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-clientid">Client ID</label>
+            <input type="text" id="eb-clientid" autocomplete="off"></div>
+          <div class="field"><label class="lbl" for="eb-clientsecret">Client Secret</label>
+            <input type="password" id="eb-clientsecret" autocomplete="new-password"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label class="lbl" for="eb-refresh">Refresh Token</label>
+            <input type="password" id="eb-refresh" autocomplete="new-password"></div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
           <button type="button" class="btn ghost" id="eb-test-central">Test connection</button>
@@ -2008,6 +1992,7 @@
   }
   fillSelect(document.getElementById("c-baseurl"), CLASSIC_URLS);
   fillSelect(document.getElementById("n-cluster"), NEW_URLS);
+  fillSelect(document.getElementById("eb-baseurl"), CLASSIC_URLS);
   document.getElementById("year").textContent = new Date().getFullYear();
 
   /* Tabs */
@@ -2905,10 +2890,22 @@
 
   /* ---- External Backup (SSH device pull -> SCP/SFTP/FTP, scheduled) ---- */
   function ebErr(m) { var e = document.getElementById("eb-err"); e.textContent = m || ""; e.hidden = !m; }
-  function ebFlavorSync() {
-    var isNew = document.getElementById("eb-flavor").value === "new";
-    document.getElementById("eb-classic-fields").hidden = isNew;
-    document.getElementById("eb-new-fields").hidden = !isNew;
+  function ebBaseUrl() {
+    var sel = document.getElementById("eb-baseurl");
+    if (sel.value === "__custom__") return document.getElementById("eb-baseurl-custom").value.trim();
+    return sel.value;
+  }
+  function ebSetBaseUrl(url) {
+    var sel = document.getElementById("eb-baseurl");
+    var known = Array.prototype.some.call(sel.options, function (o) { return o.value === url; });
+    if (url && !known) {
+      sel.value = "__custom__";
+      document.querySelector('[data-custom-for="eb-baseurl"]').hidden = false;
+      document.getElementById("eb-baseurl-custom").value = url;
+    } else {
+      sel.value = url || "";
+      document.querySelector('[data-custom-for="eb-baseurl"]').hidden = true;
+    }
   }
   function ebFmtTime(ts) {
     if (!ts) return "—";
@@ -2933,18 +2930,12 @@
     }).catch(function () { ebErr("Network error loading backup settings."); });
   }
   function ebRender(cfg) {
-    document.getElementById("eb-flavor").value = cfg.flavor || "classic";
-    ebFlavorSync();
-    document.getElementById("eb-baseurl").value = cfg.central.baseUrl || "";
+    ebSetBaseUrl(cfg.central.baseUrl || "");
     document.getElementById("eb-clientid").value = cfg.central.clientId || "";
     document.getElementById("eb-clientsecret").value = "";
     document.getElementById("eb-clientsecret").placeholder = cfg.central.clientSecret ? "•••••••• (unchanged)" : "";
     document.getElementById("eb-refresh").value = "";
     document.getElementById("eb-refresh").placeholder = cfg.central.refreshToken ? "•••••••• (unchanged)" : "";
-    document.getElementById("eb-cluster").value = cfg.central.clusterUrl || "";
-    document.getElementById("eb-nc-clientid").value = cfg.central.clientId || "";
-    document.getElementById("eb-nc-clientsecret").value = "";
-    document.getElementById("eb-nc-clientsecret").placeholder = cfg.central.clientSecret ? "•••••••• (unchanged)" : "";
     document.getElementById("eb-dev-user").value = cfg.deviceAuth.username || "";
     document.getElementById("eb-dev-pass").value = "";
     document.getElementById("eb-dev-pass").placeholder = cfg.deviceAuth.password ? "•••••••• (unchanged)" : "";
@@ -2988,15 +2979,10 @@
     });
   }
   function ebPayload() {
-    var isNew = document.getElementById("eb-flavor").value === "new";
     return {
-      flavor: document.getElementById("eb-flavor").value,
-      central: isNew ? {
-        clusterUrl: document.getElementById("eb-cluster").value.trim(),
-        clientId: document.getElementById("eb-nc-clientid").value.trim(),
-        clientSecret: document.getElementById("eb-nc-clientsecret").value,
-      } : {
-        baseUrl: document.getElementById("eb-baseurl").value.trim(),
+      flavor: "classic",
+      central: {
+        baseUrl: ebBaseUrl(),
         clientId: document.getElementById("eb-clientid").value.trim(),
         clientSecret: document.getElementById("eb-clientsecret").value,
         refreshToken: document.getElementById("eb-refresh").value,
@@ -3109,7 +3095,6 @@
   var ebCardBtn = document.querySelector("[data-extbackup]");
   if (ebCardBtn) ebCardBtn.addEventListener("click", openExtBackup);
   document.getElementById("extbak-back").addEventListener("click", closeConfig);
-  document.getElementById("eb-flavor").addEventListener("change", ebFlavorSync);
   document.getElementById("eb-test-central").addEventListener("click", ebTestCentral);
   document.getElementById("eb-test-dest").addEventListener("click", ebTestDest);
   document.getElementById("eb-save").addEventListener("click", ebSave);
