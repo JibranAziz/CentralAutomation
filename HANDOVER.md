@@ -750,11 +750,14 @@ process restarts. Everything else in this app stays in-memory-only.
 **What it does**: on a schedule (or on demand), it discovers every AP/switch/
 gateway's management IP via Central's monitoring API, **SSHes directly into
 each device** (not through Central) to run `show running-config`, and uploads
-the result to an external SCP/SFTP/FTP server, sorted into `APs/` /
-`Switches/` / `Gateways/` folders with the device name + a `YYYYmmdd-HHMMSS`
-timestamp in the filename. This only works when the app itself is on a host
-with real network/SSH reachability to the devices — the UI says so up front
-(`.warnbox` in the panel).
+the result to an external SCP/SFTP/FTP server at
+`<basePath>/<Site>/<Group>/<APs|Switches|Gateways>/<DeviceName>/<DeviceName>_<YYYYmmdd-HHMMSS>.cfg`
+— site and group name are exactly what Central reports for that device
+(sanitized to `No-Site`/`No-Group` if either is blank), so re-running the job
+against a changed fleet naturally reorganizes into the current site/group
+layout rather than accumulating under stale names. This only works when the
+app itself is on a host with real network/SSH reachability to the devices —
+the UI says so up front (`.warnbox` in the panel).
 
 ### Persistence & token refresh
 
@@ -782,7 +785,9 @@ with real network/SSH reachability to the devices — the UI says so up front
   normalizers as Inventory/View Configuration (`CLASSIC_SOURCES` +
   `_classic_norm_device` for Classic; `/network-monitoring/v1/devices` +
   `_categorize` + `_norm_device` for New Central), filters to devices with a
-  real IP (`_usable`: not empty, "—", or "0.0.0.0").
+  real IP (`_usable`: not empty, "—", or "0.0.0.0"). Each row also carries
+  `site` and `group` (`group_name`/`group` for Classic, `deviceGroupName`/
+  `groupName` for New Central) — used for the upload folder layout.
 - `_backup_ssh_pull(ip, username, password, category)` — `asyncssh.connect(...,
   known_hosts=None)` (device host keys aren't pre-known/pinned — accept-any,
   documented trade-off), then **two strategies per candidate command** (from

@@ -4561,7 +4561,8 @@ async def _backup_discover_devices(flavor: str, host: str, token: str) -> list[d
                     row = _classic_norm_device(x)
                     if _usable(row["ip"]):
                         out.append({"serial": row["serial"], "name": row["name"],
-                                   "ip": row["ip"], "category": labels[cat]})
+                                   "ip": row["ip"], "category": labels[cat],
+                                   "site": row["site"], "group": _pick(x, "group_name", "group", default="")})
         else:
             raw, _t, _sc = await _fetch_all(cx, f"https://{host}/network-monitoring/v1/devices",
                                             hdr, style="cursor")
@@ -4571,7 +4572,8 @@ async def _backup_discover_devices(flavor: str, host: str, token: str) -> list[d
                     continue
                 row = _norm_device(x)
                 if _usable(row["ip"]):
-                    out.append({"serial": row["serial"], "name": row["name"], "ip": row["ip"], "category": cat})
+                    out.append({"serial": row["serial"], "name": row["name"], "ip": row["ip"], "category": cat,
+                               "site": row["site"], "group": x.get("deviceGroupName") or x.get("groupName") or ""})
     return out
 
 
@@ -4680,8 +4682,9 @@ async def _backup_ssh_pull(ip: str, username: str, password: str, category: str)
     return None, last_err
 
 
-def _backup_safe_name(s: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", s or "device").strip("_") or "device"
+def _backup_safe_name(s: str, fallback: str = "device") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", s or fallback).strip("_")
+    return cleaned or fallback
 
 
 def _backup_ftp_upload(dest: dict[str, Any], rel: str, data: bytes) -> None:
@@ -4775,8 +4778,12 @@ async def _run_backup_job(trigger: str = "scheduled") -> dict[str, Any]:
                     report["errors"].append({"device": dev["name"], "ip": dev["ip"],
                                              "category": dev["category"], "error": err})
                     return
-                fname = f"{_backup_safe_name(dev['name'] or dev['serial'])}_{ts}.cfg"
-                rel = "/".join(p for p in (base, _BACKUP_FOLDER[dev["category"]], fname) if p)
+                dev_name = _backup_safe_name(dev["name"] or dev["serial"])
+                site_dir = _backup_safe_name(dev.get("site"), "No-Site")
+                group_dir = _backup_safe_name(dev.get("group"), "No-Group")
+                fname = f"{dev_name}_{ts}.cfg"
+                rel = "/".join(p for p in (base, site_dir, group_dir, _BACKUP_FOLDER[dev["category"]],
+                                          dev_name, fname) if p)
                 try:
                     await _backup_upload(dest, rel, text.encode("utf-8", "replace"))
                     report["counts"][dev["category"]] += 1
