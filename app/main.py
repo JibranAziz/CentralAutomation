@@ -4783,7 +4783,7 @@ async def _run_backup_job(trigger: str = "scheduled") -> dict[str, Any]:
                 group_dir = _backup_safe_name(dev.get("group"), "No-Group")
                 fname = f"{dev_name}_{ts}.cfg"
                 rel = "/".join(p for p in (base, site_dir, group_dir, _BACKUP_FOLDER[dev["category"]],
-                                          dev_name, fname) if p)
+                                          fname) if p)
                 try:
                     await _backup_upload(dest, rel, text.encode("utf-8", "replace"))
                     report["counts"][dev["category"]] += 1

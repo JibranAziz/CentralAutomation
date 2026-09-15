@@ -751,7 +751,7 @@ process restarts. Everything else in this app stays in-memory-only.
 gateway's management IP via Central's monitoring API, **SSHes directly into
 each device** (not through Central) to run `show running-config`, and uploads
 the result to an external SCP/SFTP/FTP server at
-`<basePath>/<Site>/<Group>/<APs|Switches|Gateways>/<DeviceName>/<DeviceName>_<YYYYmmdd-HHMMSS>.cfg`
+`<basePath>/<Site>/<Group>/<APs|Switches|Gateways>/<DeviceName>_<YYYYmmdd-HHMMSS>.cfg`
 — site and group name are exactly what Central reports for that device
 (sanitized to `No-Site`/`No-Group` if either is blank), so re-running the job
 against a changed fleet naturally reorganizes into the current site/group
