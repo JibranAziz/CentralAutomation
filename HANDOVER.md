@@ -637,6 +637,22 @@ toward the client end. Nodes are **drag-repositionable** (pointer events +
 `getScreenCTM` for client→SVG coords; connected links and labels redraw live; a
 >4 px move suppresses the click-to-open). Shared code across New and Classic.
 
+**Zoom / pan**: the SVG is wrapped in a `.topo-viewport` div inside the fixed-size
+`.topo-wrap` box (`overflow: hidden`); zoom/pan is a CSS
+`translate(tx,ty) scale(s)` on that div, driven by `topoState` (`{scale, tx, ty,
+fit, viewport, wrap}`) — a single shared mutable object rather than a per-render
+closure, because `setupTopoZoom` runs on every redraw (device switch, "Reset
+layout") but the wrap/button listeners are bound **once** (`topoListenersBound`
+guard) to avoid stacking duplicate listeners on the long-lived `#topo-wrap`
+element. On each draw, the box locks to `natHeight × fit` px where
+`fit = min(1, boxWidth / natWidth)` — this is also the "Fit" zoom level.
+Mouse wheel zooms centered on the cursor (`topoZoomAt`, clamped `0.25×`–`3×`);
+dragging the background pans (skipped when the pointerdown target is inside a
+`.topo-node`, so it doesn't fight node-repositioning); +/− buttons and a Fit
+button zoom around the box center / reset. `clientToSvg()` (used by node drag)
+keeps working unchanged at any zoom/pan because it reads the live
+`svg.getScreenCTM()`, which already folds in the viewport's CSS transform.
+
 ## CLI-based configuration push (Classic, AP-CLI)
 
 The Configuration section (Classic tab) uses the **AP-CLI** API:

@@ -581,15 +581,27 @@
   #entity-topo { margin-top: 18px; grid-column: 1 / -1; }
   .topo-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
   .topo-note { font-size: 11.5px; color: var(--faint); }
-  #topo-reset { margin-left: auto; }
+  .topo-zoom { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .topo-zoom button.linkbtn {
+    width: 22px; height: 22px; line-height: 20px; text-align: center; padding: 0;
+    border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+  }
+  #topo-zoom-fit { width: auto; padding: 0 8px; font-size: 11.5px; }
+  .topo-zoom-pct {
+    font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums;
+    min-width: 34px; text-align: center;
+  }
+  #topo-reset { margin-left: 12px; }
   .topo-wrap {
-    overflow-x: auto; border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden; position: relative; border: 1px solid var(--border); border-radius: 14px;
     background:
       radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
       var(--surface);
-    box-shadow: var(--shadow); padding: 8px;
+    box-shadow: var(--shadow); padding: 8px; cursor: grab; touch-action: none;
   }
-  .topo-wrap svg { display: block; height: auto; max-width: 100%; }
+  .topo-wrap.panning { cursor: grabbing; }
+  .topo-viewport { transform-origin: 0 0; will-change: transform; }
+  .topo-viewport svg { display: block; }
   .topo-link { stroke: var(--border-strong); stroke-width: 1.6; fill: none; }
   .topo-link.active { stroke: var(--accent); stroke-width: 2.6; stroke-dasharray: 7 6; animation: topoflow .7s linear infinite; }
   .topo-link.down { stroke: color-mix(in srgb, var(--down) 60%, var(--border-strong)); stroke-dasharray: 3 4; }
@@ -1787,6 +1799,12 @@
             <div class="topo-head">
               <span class="panel-head" style="margin:0">Topology</span>
               <span class="topo-note" id="topo-note"></span>
+              <span class="topo-zoom">
+                <button class="linkbtn" type="button" id="topo-zoom-out" title="Zoom out">−</button>
+                <span class="topo-zoom-pct" id="topo-zoom-pct">100%</span>
+                <button class="linkbtn" type="button" id="topo-zoom-in" title="Zoom in">+</button>
+                <button class="linkbtn" type="button" id="topo-zoom-fit">Fit</button>
+              </span>
               <button class="linkbtn" type="button" id="topo-reset" hidden>Reset layout</button>
             </div>
             <div class="topo-wrap" id="topo-wrap"></div>
@@ -4180,11 +4198,13 @@
     box.hidden = false;
     legend.innerHTML = "";
     note.textContent = "";
+    wrap.style.height = "";
     wrap.innerHTML = loadrow("Building topology…") +
       '<div class="egroup-skl"><span class="skl" style="height:120px"></span></div>';
     api("/api/topology/" + activeFlavor + "/" + encodeURIComponent(meta.siteId)).then(function (res) {
       if (!res.ok || !res.body.nodes) {
         wrap.innerHTML = "";
+        wrap.style.height = "";
         note.textContent = (res.body && res.body.error) || "Topology unavailable for this site.";
         return;
       }
@@ -4198,6 +4218,89 @@
     if (!lastTopo) return;
     drawTopology(document.getElementById("topo-wrap"), document.getElementById("topo-legend"),
       document.getElementById("topo-note"), lastTopo.data, lastTopo.meta);
+  });
+
+  // ---- topology zoom / pan ----
+  // The wrap box locks to a fixed pixel size (width x height at the initial
+  // "fit" scale) and everything past that is a CSS transform on .topo-viewport
+  // — node dragging keeps working unchanged because clientToSvg() reads the
+  // live getScreenCTM(), which already folds in this transform.
+  // Mutable shared state rather than a per-call closure: setupTopoZoom() runs
+  // on every redraw (device switch, Reset layout), and the wrap element is a
+  // stable singleton — binding fresh listeners each time would stack
+  // duplicates on it forever, so the wrap/button listeners are bound once and
+  // just read/write this state.
+  var topoState = null;   // { scale, tx, ty, fit, viewport, wrap }
+  var topoListenersBound = false;
+  var TOPO_MIN = 0.25, TOPO_MAX = 3;
+  function topoApply() {
+    if (!topoState) return;
+    topoState.viewport.style.transform =
+      "translate(" + topoState.tx + "px," + topoState.ty + "px) scale(" + topoState.scale + ")";
+    var pctEl = document.getElementById("topo-zoom-pct");
+    if (pctEl) pctEl.textContent = Math.round(topoState.scale * 100) + "%";
+  }
+  function topoZoomAt(cx, cy, factor) {
+    if (!topoState) return;
+    var rect = topoState.wrap.getBoundingClientRect();
+    var mx = cx - rect.left, my = cy - rect.top;
+    var next = Math.max(TOPO_MIN, Math.min(TOPO_MAX, topoState.scale * factor));
+    if (next === topoState.scale) return;
+    var cxContent = (mx - topoState.tx) / topoState.scale, cyContent = (my - topoState.ty) / topoState.scale;
+    topoState.tx = mx - cxContent * next;
+    topoState.ty = my - cyContent * next;
+    topoState.scale = next;
+    topoApply();
+  }
+  function bindTopoListeners(wrap) {
+    wrap.addEventListener("wheel", function (e) {
+      if (!topoState) return;
+      e.preventDefault();
+      topoZoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+    var panFrom = null;
+    wrap.addEventListener("pointerdown", function (e) {
+      if (!topoState || (e.button != null && e.button > 0)) return;
+      if (e.target.closest(".topo-node")) return;   // node drag handles itself
+      panFrom = { x: e.clientX, y: e.clientY, tx: topoState.tx, ty: topoState.ty };
+      wrap.classList.add("panning");
+      try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    wrap.addEventListener("pointermove", function (e) {
+      if (!panFrom || !topoState) return;
+      topoState.tx = panFrom.tx + (e.clientX - panFrom.x);
+      topoState.ty = panFrom.ty + (e.clientY - panFrom.y);
+      topoApply();
+    });
+    function endPan(e) {
+      panFrom = null;
+      wrap.classList.remove("panning");
+      try { wrap.releasePointerCapture(e.pointerId); } catch (err) {}
+    }
+    wrap.addEventListener("pointerup", endPan);
+    wrap.addEventListener("pointercancel", endPan);
+  }
+  function setupTopoZoom(wrap, viewport, natW, natH) {
+    var boxW = wrap.clientWidth || natW;
+    var fit = Math.min(1, boxW / natW);
+    wrap.style.height = Math.round(natH * fit) + "px";
+    topoState = { scale: fit, tx: 0, ty: 0, fit: fit, viewport: viewport, wrap: wrap };
+    topoApply();
+    if (!topoListenersBound) { topoListenersBound = true; bindTopoListeners(wrap); }
+  }
+  document.getElementById("topo-zoom-in").addEventListener("click", function () {
+    if (!topoState) return;
+    var r = topoState.wrap.getBoundingClientRect();
+    topoZoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.3);
+  });
+  document.getElementById("topo-zoom-out").addEventListener("click", function () {
+    if (!topoState) return;
+    var r = topoState.wrap.getBoundingClientRect();
+    topoZoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.3);
+  });
+  document.getElementById("topo-zoom-fit").addEventListener("click", function () {
+    if (!topoState) return;
+    topoState.scale = topoState.fit; topoState.tx = 0; topoState.ty = 0; topoApply();
   });
 
   function drawTopology(wrap, legend, note, data, meta) {
@@ -4296,7 +4399,7 @@
       width = Math.max(width, pos.__client__.x + pos.__client__.w / 2 + 24);
     }
 
-    var svg = el("svg", { viewBox: "0 0 " + width + " " + height, width: width, "font-family": "inherit" });
+    var svg = el("svg", { viewBox: "0 0 " + width + " " + height, width: width, height: height, "font-family": "inherit" });
 
     Object.keys(layers).forEach(function (k) {
       var name = LAYER_NAME[nodes[layers[k][0]].n.type] || (k === "0" ? "Internet" : "Devices");
@@ -4439,12 +4542,16 @@
 
     labelEls.forEach(function (lb) { placeLabel(lb); svg.appendChild(lb.g); });
 
+    var viewport = document.createElement("div");
+    viewport.className = "topo-viewport";
+    viewport.appendChild(svg);
     wrap.innerHTML = "";
-    wrap.appendChild(svg);
+    wrap.appendChild(viewport);
+    setupTopoZoom(wrap, viewport, width, height);
     var iso = data.isolated || 0;
     note.textContent = (focusMissing ? "This device has no topology links — showing the site graph. " : "")
       + (order.length - 1) + " connected node" + (order.length - 1 === 1 ? "" : "s")
-      + (iso ? " · " + iso + " not linked" : "") + " · click to open, drag to rearrange";
+      + (iso ? " · " + iso + " not linked" : "") + " · click to open, drag a node to rearrange, drag the background to pan, scroll to zoom";
     legend.innerHTML = "";
     [["Active path", "var(--accent)", ""], ["Link", "var(--border-strong)", ""],
      ["Degraded", "var(--down)", ""], ["Not managed by Central", "var(--faint)", "dashed"]]
