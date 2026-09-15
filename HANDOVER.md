@@ -730,8 +730,12 @@ per-group text) and a confirm-gated **Deploy**.
 
 ## External Backup (SSH device pull, scheduled)
 
-An **"External Backup"** Account Overview card (visible for both flavors) →
-the `#extbak` panel. This is a deliberate departure from the rest of the app:
+An **"External Backup"** Account Overview card (visible for both flavors, but
+the feature itself is **Classic Central only** — device discovery goes
+through the Classic monitoring API, then SSHes to devices directly; New
+Central support was speculative and was removed along with the flavor
+picker) → the `#extbak` panel. This is a deliberate departure from the rest
+of the app:
 it's the **one feature whose config is persisted to disk** (`data/backup_config.json`,
 created 0600, `data/` gitignored), because a scheduled job has to survive
 process restarts. Everything else in this app stays in-memory-only.
