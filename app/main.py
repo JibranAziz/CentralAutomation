@@ -4744,6 +4744,11 @@ async def _run_backup_job(trigger: str = "scheduled") -> dict[str, Any]:
         report["message"] = "Backup job is disabled."
         report["finishedAt"] = _now()
         return report
+    missing = _backup_missing_fields(cfg)
+    if missing:
+        report["message"] = "Not configured — missing: " + ", ".join(missing) + "."
+        report["finishedAt"] = _now()
+        return report
     if _backup_status["running"]:
         report["message"] = "A run was already in progress."
         report["finishedAt"] = _now()
@@ -4848,6 +4853,34 @@ async def backup_get_config() -> JSONResponse:
     return JSONResponse(_backup_public(_backup_load()))
 
 
+def _backup_missing_fields(cfg: dict[str, Any]) -> list[str]:
+    """Fields required for a run to even attempt anything — checked whenever
+    the job is (or stays) enabled, so a blank field fails loudly at Save
+    time instead of silently saving and only surfacing as every device
+    failing SSH auth on the next run."""
+    c, d, dest = cfg["central"], cfg["deviceAuth"], cfg["destination"]
+    missing = []
+    if not c.get("baseUrl"):
+        missing.append("Central Base URL")
+    if not c.get("clientId"):
+        missing.append("Central Client ID")
+    if not c.get("clientSecret"):
+        missing.append("Central Client Secret")
+    if not c.get("refreshToken"):
+        missing.append("Central Refresh Token")
+    if not d.get("username"):
+        missing.append("Device SSH username")
+    if not d.get("password"):
+        missing.append("Device SSH password")
+    if not dest.get("host"):
+        missing.append("Destination host")
+    if not dest.get("username"):
+        missing.append("Destination username")
+    if not dest.get("password"):
+        missing.append("Destination password")
+    return missing
+
+
 @app.post("/api/backup/config")
 async def backup_set_config(request: Request) -> JSONResponse:
     body = await request.json()
@@ -4856,12 +4889,19 @@ async def backup_set_config(request: Request) -> JSONResponse:
         cfg["flavor"] = body["flavor"]
     for section in ("central", "deviceAuth", "destination", "schedule"):
         _backup_apply_section(cfg, section, body.get(section))
-    if "enabled" in body:
-        cfg["enabled"] = bool(body["enabled"])
+    # Everything else the user changed is still saved even if enabling fails
+    # validation below — losing an unrelated edit because one field is blank
+    # would be its own bug.
+    wants_enabled = bool(body["enabled"]) if "enabled" in body else cfg.get("enabled")
+    missing = _backup_missing_fields(cfg) if wants_enabled else []
+    cfg["enabled"] = bool(wants_enabled and not missing)
     cfg["state"] = {"accessToken": "", "accessExpiry": 0}  # credentials may have changed
     cfg["nextRun"] = _backup_compute_next(cfg["schedule"])
     _backup_save(cfg)
-    return JSONResponse(_backup_public(cfg))
+    out = _backup_public(cfg)
+    if missing:
+        out["warning"] = "Saved, but not enabled — missing: " + ", ".join(missing) + "."
+    return JSONResponse(out)
 
 
 @app.post("/api/backup/test-central")

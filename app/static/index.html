@@ -781,8 +781,8 @@
           <div class="err">Refresh token is required.</div>
         </div>
 
-        <label class="chk chk-remember"><input type="checkbox" data-remember> Remember Client ID &amp; Secret on this browser</label>
-        <div class="hint" style="margin:-2px 0 12px">Saved only in this browser (localStorage) — never sent to or stored on the server. The refresh token is never saved; re-enter it when it expires.</div>
+        <label class="chk chk-remember"><input type="checkbox" data-remember> Remember Client ID, Secret &amp; Refresh Token on this browser</label>
+        <div class="hint" style="margin:-2px 0 12px">Saved only in this browser (localStorage) — never sent to or stored on the server. Central rotates the refresh token every time it's used to connect, so the remembered one only still works if it hasn't been used yet (e.g. you filled this in but didn't connect, or a connect attempt failed before reaching Central) — once you connect successfully, re-enter a fresh one next time.</div>
 
         <div class="info">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.3" stroke="currentColor" stroke-width="1.2"/><path d="M7 6v4M7 4.2v.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -1512,7 +1512,7 @@
         <p class="cgroup-count" style="margin:-2px 0 8px">Classic Central only — External Backup discovers devices via the Classic API, then SSHes to them directly.</p>
         <div class="field-row">
           <div class="field" style="flex:2">
-            <label class="lbl" for="eb-baseurl">Base URL</label>
+            <label class="lbl" for="eb-baseurl">Base URL <span class="req">*</span></label>
             <select id="eb-baseurl" data-mono></select>
           </div>
         </div>
@@ -1521,13 +1521,13 @@
           <input type="text" id="eb-baseurl-custom" data-mono autocomplete="off" placeholder="apigw-yourregion.central.arubanetworks.com">
         </div>
         <div class="field-row">
-          <div class="field"><label class="lbl" for="eb-clientid">Client ID</label>
+          <div class="field"><label class="lbl" for="eb-clientid">Client ID <span class="req">*</span></label>
             <input type="text" id="eb-clientid" autocomplete="off"></div>
-          <div class="field"><label class="lbl" for="eb-clientsecret">Client Secret</label>
+          <div class="field"><label class="lbl" for="eb-clientsecret">Client Secret <span class="req">*</span></label>
             <input type="password" id="eb-clientsecret" autocomplete="new-password"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label class="lbl" for="eb-refresh">Refresh Token</label>
+          <div class="field"><label class="lbl" for="eb-refresh">Refresh Token <span class="req">*</span></label>
             <input type="password" id="eb-refresh" autocomplete="new-password"></div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
@@ -1540,9 +1540,9 @@
           One admin username/password, tried over SSH against every discovered AP, switch and gateway.
         </p>
         <div class="field-row">
-          <div class="field"><label class="lbl" for="eb-dev-user">Username</label>
+          <div class="field"><label class="lbl" for="eb-dev-user">Username <span class="req">*</span></label>
             <input type="text" id="eb-dev-user" autocomplete="off" placeholder="admin"></div>
-          <div class="field"><label class="lbl" for="eb-dev-pass">Password</label>
+          <div class="field"><label class="lbl" for="eb-dev-pass">Password <span class="req">*</span></label>
             <input type="password" id="eb-dev-pass" autocomplete="new-password"></div>
         </div>
 
@@ -1554,15 +1554,15 @@
               <option value="scp">SCP</option>
               <option value="ftp">FTP</option>
             </select></div>
-          <div class="field" style="flex:2"><label class="lbl" for="eb-host">Host</label>
+          <div class="field" style="flex:2"><label class="lbl" for="eb-host">Host <span class="req">*</span></label>
             <input type="text" id="eb-host" autocomplete="off"></div>
           <div class="field"><label class="lbl" for="eb-port">Port</label>
             <input type="text" id="eb-port" data-mono autocomplete="off" placeholder="22 / 21"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label class="lbl" for="eb-dest-user">Username</label>
+          <div class="field"><label class="lbl" for="eb-dest-user">Username <span class="req">*</span></label>
             <input type="text" id="eb-dest-user" autocomplete="off"></div>
-          <div class="field"><label class="lbl" for="eb-dest-pass">Password</label>
+          <div class="field"><label class="lbl" for="eb-dest-pass">Password <span class="req">*</span></label>
             <input type="password" id="eb-dest-pass" autocomplete="new-password"></div>
           <div class="field" style="flex:2"><label class="lbl" for="eb-path">Base path</label>
             <input type="text" id="eb-path" data-mono autocomplete="off" placeholder="/backups/aruba"></div>
@@ -3011,6 +3011,7 @@
     api("/api/backup/config", { method: "POST", body: JSON.stringify(ebPayload()) }).then(function (res) {
       if (!res.ok) { ebErr((res.body && res.body.error) || "Could not save."); return; }
       ebRender(res.body);
+      if (res.body.warning) ebErr(res.body.warning);
     }).catch(function () { ebErr("Network error."); });
   }
   function ebTestCentral() {
@@ -4974,10 +4975,10 @@
       return data;
     }
 
-    /* Remember Client ID + Secret (+ base URL / cluster) in this browser only */
+    /* Remember Client ID + Secret + Refresh Token (+ base URL / cluster) in this browser only */
     var remember = form.querySelector("[data-remember]");
     var LS_KEY = "acs.creds." + cfg.key;
-    var REMEMBER_FIELDS = ["clientId", "clientSecret", "baseUrl", "cluster"];
+    var REMEMBER_FIELDS = ["clientId", "clientSecret", "baseUrl", "cluster", "refreshToken"];
 
     function persistRemembered() {
       try {

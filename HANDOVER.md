@@ -46,12 +46,19 @@ Browser ──HTTPS──> nginx (terminates TLS) ──proxy──> 127.0.0.1:8
 - **No server-side credential storage.** Sessions live only in the uvicorn
   process memory, keyed by cookie `acs_sid` (12 h idle TTL). New browser = new
   session. Restart clears everything.
-- **"Remember Client ID & Secret" checkbox** (per connect form) is purely
-  client-side: `wire()` stores `{clientId, clientSecret, baseUrl|cluster}` in
-  `localStorage["acs.creds.<classic|new>"]` on submit when ticked, clears it when
-  unticked, and `loadRemembered()` prefills on load. The **refresh token is never
-  saved** — that's the point (Classic tokens rotate, so you re-enter it each time
-  it expires). Nothing about this touches the server.
+- **"Remember Client ID, Secret & Refresh Token" checkbox** (per connect form)
+  is purely client-side: `wire()` stores `{clientId, clientSecret,
+  baseUrl|cluster, refreshToken}` in `localStorage["acs.creds.<classic|new>"]`
+  on submit when ticked, clears it when unticked, and `loadRemembered()`
+  prefills on load. Nothing about this touches the server. The New Central form
+  has no refresh token field, so `refreshToken` is simply absent from what it
+  remembers. Classic **rotates** the refresh token on every successful
+  connect, so a remembered one only still works if it was never actually
+  consumed (typed in but not yet connected, or a connect attempt that failed
+  before reaching Central) — after a successful connect you re-enter a fresh
+  one, same as before this existed. The backend deliberately never returns the
+  rotated token to the frontend (`_public()` / `_state()` omit it), so there's
+  no way to keep the remembered copy in sync with what's actually valid.
 
 ## Stack
 
