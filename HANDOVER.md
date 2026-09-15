@@ -774,19 +774,31 @@ with real network/SSH reachability to the devices — the UI says so up front
   real IP (`_usable`: not empty, "—", or "0.0.0.0").
 - `_backup_ssh_pull(ip, username, password, category)` — `asyncssh.connect(...,
   known_hosts=None)` (device host keys aren't pre-known/pinned — accept-any,
-  documented trade-off) then `conn.run(cmd, check=False)` **without a PTY**,
-  which is what lets a plain one-shot `show running-config` skip most devices'
-  interactive pager. `_BACKUP_CMDS` is a per-category list of candidate
-  commands tried in order until one returns non-empty, non-error output —
-  currently just `["show running-config"]` for all three categories (AOS8/
-  Instant, AOS-CX and AOS-S switches, and MC/gateway CLIs all accept it).
-  **Only verified mechanically** (asyncssh connect/auth/exec against a plain
-  Linux sshd — real connect, real auth-failure, and real timeout paths all
-  behaved correctly); **not yet run against a real Aruba device** — no test
-  device with known SSH admin credentials was available. AOS10 APs in
-  particular may not expose a local CLI over SSH at all (they're normally
-  fully cloud-managed) — if that turns out to be the case, those rows will
-  just show up as per-device errors in the run's history, not crash the job.
+  documented trade-off), then **two strategies per candidate command** (from
+  `_BACKUP_CMDS`, currently `["show running-config"]` for all three
+  categories):
+  1. A plain SSH **exec** (`conn.run(cmd, check=False)`, no PTY) — clean
+     output, no pager. What AOS-CX/AOS-S switches and gateways want.
+  2. If that fails, an **interactive PTY shell** on a *fresh* connection
+     (`_backup_shell_capture`: `conn.create_process(term_type="vt100",
+     term_size=(200,50))`, write the command, read-until-idle for
+     `idle_timeout` seconds since there's no one fixed prompt string across
+     AOS8/Instant/AOS10/AOS-CX/AOS-S/gateway CLIs) — what **Instant/AOS10 APs
+     require**: they reject a bare exec with `"Only cli connections are
+     allowed to the AP"` and then **close the whole connection**, which is
+     why the fallback reconnects rather than reusing the exec connection.
+     `_backup_clean_shell_output` strips the echoed command + trailing device
+     prompt the PTY path leaves behind.
+  `_backup_output_ok` / `_BACKUP_BAD_OUTPUT` reject empty output and known
+  error strings (`% invalid`, `% parse error`, `unknown command`, the AP
+  exec-rejection message) so a failed attempt falls through cleanly instead
+  of "succeeding" with garbage.
+  **Verified live against real hardware** (creds `admin`/`<tenant password>`,
+  found live on Jibran's LAN): 5 Instant APs (3.5–17.9 KB configs, via the PTY
+  path) and 2 AOS-CX switches (4.4 KB each, via the plain-exec path) all
+  returned clean, complete running-configs. A third switch (AOS-S 2930M) and
+  all gateways were unreachable on this tenant at the time (offline / no
+  management IP) — a connectivity fact, not a credential or protocol problem.
 - `_backup_upload(dest, rel, data)` — SCP and SFTP are both implemented as
   **SFTP-over-SSH** via asyncssh (`start_sftp_client`, `_sftp_mkdirs` for
   `mkdir -p` semantics, `sftp.open(...).write(...)`) since almost every "SCP
@@ -841,6 +853,9 @@ with real network/SSH reachability to the devices — the UI says so up front
   0600-permissioned) JSON file on disk. Device SSH host keys are accepted
   unconditionally (`known_hosts=None`, both for the devices and the
   destination server) — no host-key pinning/verification. `show
-  running-config` over SSH was verified mechanically but never against a real
-  Aruba device; FTP upload was implemented but never live-tested (no FTP
-  server on hand). AOS10 APs may not expose a local CLI over SSH at all.
+  running-config` over SSH is verified against real Instant APs and AOS-CX
+  switches (see the dedicated section above); AOS-S switches and gateways
+  were unreachable on the one tenant tested, so their candidate commands are
+  unverified against real hardware. FTP upload was implemented but never
+  live-tested (no FTP server on hand) — SFTP was verified instead, and shares
+  the same upload/mkdir code path SCP uses.
